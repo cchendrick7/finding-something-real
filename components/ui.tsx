@@ -49,7 +49,7 @@ export function Card({
   children, tone, onPress, style, testID,
 }: {
   children: React.ReactNode;
-  tone?: 'plain' | 'ink' | 'wash' | 'sage' | 'gold' | 'blush' | 'blue';
+  tone?: 'plain' | 'ink' | 'wash' | 'sage' | 'gold' | 'blush' | 'blue' | 'blueSolid';
   onPress?: () => void; style?: ViewStyle; testID?: string;
 }) {
   const tones: Record<string, ViewStyle> = {
@@ -60,6 +60,10 @@ export function Card({
     gold: { backgroundColor: color.goldWash, borderColor: 'transparent' },
     blush: { backgroundColor: color.blushWash, borderColor: 'transparent' },
     blue: { backgroundColor: color.blueWash, borderColor: 'transparent' },
+    // Inverted. theme.ts assigns meanings to sage/gold/blush but not blue, so
+    // blue is the accent free to mean "media" without breaking that scheme.
+    // Text on this tone must set its own colour — see (member)/home.tsx.
+    blueSolid: { backgroundColor: color.blue, borderColor: color.blue },
   };
   const inner = (
     <View style={[s.card, tones[tone ?? 'plain'], style]}>{children}</View>

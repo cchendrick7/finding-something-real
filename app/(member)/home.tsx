@@ -66,7 +66,7 @@ export default function Home() {
 
       {next ? (
         <>
-          <Eyebrow>Next recording</Eyebrow>
+          <Eyebrow>{rsvp ? 'Next recording' : 'Next recording · needs your answer'}</Eyebrow>
           <Card>
             <Row style={{ marginBottom: 8 }}>
               <Small>{formatDate(next.scheduled_at, tz)}</Small>
@@ -113,12 +113,30 @@ export default function Home() {
         </>
       ) : null}
 
+      {/*
+        Inverted, per tester feedback: this and "Next recording" were both plain
+        white cards with a title and a line of small text, so at a glance you
+        could not tell which one wanted something from you. They are different
+        kinds of thing — one is a question you owe an answer to, the other is
+        something to go and listen to — and now they look it.
+
+        Blue rather than ink because the unread-note card above is already ink,
+        and two black cards would just move the collision rather than fix it.
+      */}
       {ep ? (
         <>
           <Eyebrow>Latest episode</Eyebrow>
-          <Card onPress={() => router.push('/(member)/episodes')}>
-            <H3>{ep.title}</H3>
-            <Tiny style={{ marginTop: 4 }}>Episode {ep.number}</Tiny>
+          <Card tone="blueSolid" testID="latest-episode"
+                onPress={() => router.push('/(member)/episodes')}>
+            <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <View style={{ flex: 1, paddingRight: space.md }}>
+                <H3 style={{ color: color.white }}>{ep.title}</H3>
+                <Tiny style={{ color: 'rgba(255,255,255,0.75)', marginTop: 4 }}>
+                  Episode {ep.number} · out now
+                </Tiny>
+              </View>
+              <Tiny style={{ color: 'rgba(255,255,255,0.9)', fontSize: 18, marginTop: 2 }}>▸</Tiny>
+            </Row>
           </Card>
         </>
       ) : null}

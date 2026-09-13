@@ -167,6 +167,104 @@ export async function getRecording(id: string): Promise<Recording | null> {
   return view ? fromSessionView(view) : null;
 }
 
+/**
+ * The current season's id. Recording requires one, and until now nothing in
+ * the app ever created a Recording, so nothing needed to know it.
+ */
+export async function currentSeasonId(): Promise<string | null> {
+  if (DEMO_MODE) return db.recordings[0]?.season_id ?? 'demo-season';
+  const rows = await listAll(client.models.Season.list, {});
+  return (rows.find((s) => s.isCurrent) ?? rows[0])?.id ?? null;
+}
+
+export interface RecordingDraft {
+  title: string;
+  scheduled_at: string;          // UTC ISO — build it with zonedToUtcIso
+  duration_minutes: number;
+  guest_id: string | null;
+  topic: string | null;
+  questions_covered: string | null;
+  join_url: string | null;
+}
+
+/**
+ * Create a session.
+ *
+ * There was no way to do this. Recordings could only arrive from the Calendly
+ * webhook — which is not built — or the seed script, while the Overview told
+ * leadership to "add the topic and questions" on a screen that had no fields.
+ * No backend change was needed for this: Recording is already
+ * allow.group('leadership'), so the capability existed and only the UI was
+ * missing.
+ *
+ * Created unpublished on purpose. Publishing is the step that notifies
+ * co-hosts, and it stays a separate, deliberate action.
+ */
+export async function createRecording(draft: RecordingDraft): Promise<string | null> {
+  const seasonId = (await currentSeasonId()) ?? '';
+  if (DEMO_MODE) {
+    const id = uid();
+    db.recordings.push({
+      id, season_id: seasonId, guest_id: draft.guest_id, title: draft.title,
+      topic: draft.topic, questions_covered: draft.questions_covered, description: null,
+      scheduled_at: draft.scheduled_at, duration_minutes: draft.duration_minutes,
+      join_url: draft.join_url, published_at: null, announce_at: null, announced_at: null,
+      source: 'manual',
+    });
+    return id;
+  }
+  const r = await client.models.Recording.create({
+    seasonId,
+    title: draft.title,
+    scheduledAt: draft.scheduled_at,
+    durationMinutes: draft.duration_minutes,
+    guestId: draft.guest_id,
+    topic: draft.topic,
+    questionsCovered: draft.questions_covered,
+    joinUrl: draft.join_url,
+    source: 'manual',
+  });
+  return r?.data?.id ?? null;
+}
+
+/** Edit a session. Publishing stays in publishRecording — this never publishes. */
+export async function updateRecording(id: string, draft: RecordingDraft) {
+  if (DEMO_MODE) {
+    const r = db.recordings.find((x) => x.id === id);
+    if (r) Object.assign(r, {
+      title: draft.title, scheduled_at: draft.scheduled_at,
+      duration_minutes: draft.duration_minutes, guest_id: draft.guest_id,
+      topic: draft.topic, questions_covered: draft.questions_covered,
+      join_url: draft.join_url,
+    });
+    return;
+  }
+  await client.models.Recording.update({
+    id,
+    title: draft.title,
+    scheduledAt: draft.scheduled_at,
+    durationMinutes: draft.duration_minutes,
+    guestId: draft.guest_id,
+    topic: draft.topic,
+    questionsCovered: draft.questions_covered,
+    joinUrl: draft.join_url,
+  });
+}
+
+/** Minimal guest creation, so naming a new guest doesn't need a second screen. */
+export async function createGuest(name: string): Promise<string | null> {
+  if (DEMO_MODE) {
+    const id = uid();
+    db.guests.push({
+      id, name, photo_url: null, blurb: null, external_url: null,
+      returning_override: null, admin_notes: null,
+    });
+    return id;
+  }
+  const g = await client.models.Guest.create({ name });
+  return g?.data?.id ?? null;
+}
+
 export async function publishRecording(id: string, announceAt: string | null) {
   if (DEMO_MODE) {
     const r = db.recordings.find((x) => x.id === id);
@@ -462,11 +560,38 @@ export async function myQuestionForRecording(me: string, recordingId: string): P
     : null;
 }
 
-export async function coverageGaps(): Promise<Profile[]> {
+/**
+ * Two different problems that used to be one number.
+ *
+ * `coverageGaps` returned every co-host without an answered question, which
+ * silently merged "she asked something and we haven't covered it" with "she
+ * has never submitted anything". Those need opposite responses from Janell —
+ * the first is a scheduling job, the second is a phone call — and a tester
+ * asked what the single count meant, which is how this surfaced.
+ */
+export interface CoverageStatus {
+  /** Asked something; nothing assigned to a recording yet. Act on the backlog. */
+  waiting: Profile[];
+  /** Has never submitted a question or objection at all. Go and ask her. */
+  neverAsked: Profile[];
+}
+
+export async function coverageStatus(): Promise<CoverageStatus> {
   const intake = await listIntake();
   const members = (await listMembers()).filter((m) => m.role === 'member');
   const covered = new Set(intake.filter((q) => q.recordings.length > 0).map((q) => q.profile_id));
-  return members.filter((m) => !covered.has(m.id));
+  const asked = new Set(intake.map((q) => q.profile_id));
+  const uncovered = members.filter((m) => !covered.has(m.id));
+  return {
+    waiting: uncovered.filter((m) => asked.has(m.id)),
+    neverAsked: uncovered.filter((m) => !asked.has(m.id)),
+  };
+}
+
+/** Everyone without an answered question. Kept as the union of the two above. */
+export async function coverageGaps(): Promise<Profile[]> {
+  const { waiting, neverAsked } = await coverageStatus();
+  return [...waiting, ...neverAsked];
 }
 
 /* ----------------------------------------------------------------- prayers */

@@ -95,6 +95,7 @@ cannot see a button that writes correctly and reads back nothing:
 node scripts/security-test.mjs   # 54 passed, 0 failed
 node scripts/ui-test.mjs         # 23 passed, 0 failed
 node scripts/reset-demo.mjs      # put the demo data back after clicking around
+node scripts/tz-test.mjs         # 10 passed — pure logic, runs anywhere
 FSR_BASE=https://main.<appid>.amplifyapp.com node scripts/ui-test.mjs
 ```
 
@@ -148,6 +149,7 @@ amplify/
 scripts/
   seed.mjs               users + demo season
   security-test.mjs      54 adversarial API tests
+  tz-test.mjs            10 time-zone conversion tests (no AWS needed)
   reset-demo.mjs         undo demo drift (re-drafts the Calendly booking, etc.)
   ui-test.mjs            23 browser checks against the live deployment
   host.mjs               build + deploy the web app to Amplify Hosting
@@ -162,7 +164,7 @@ scripts/
 | Auth email | Password only for now. OTP needs SES out of sandbox + a verified domain. Passwords are set by an admin; the app never creates an account. |
 | Native SRP | Web sign-in is verified. iOS/Android need `@aws-amplify/react-native` and its crypto polyfills before SRP works there. |
 | Push delivery | Model and registration built; needs APNs/FCM credentials. |
-| Calendly webhook | Draft-recording flow works; inbound webhook needs a paid Calendly plan. |
+| Calendly webhook | Sessions can now be created and edited in the portal, so Calendly is optional. The inbound webhook still needs a paid Calendly plan. |
 | Scheduled reminders | 24h/1h logic in the schema; needs an EventBridge rule. |
 | Codec Pro | Body text falls back to system stack pending the licence decision. |
 | App icon | Needs a square mark legible at 60px — not in the brand PDF. |

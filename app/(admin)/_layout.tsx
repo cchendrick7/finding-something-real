@@ -84,6 +84,8 @@ export default function AdminLayout() {
       <Tabs.Screen name="intake" options={{ title: 'Intake' }} />
       <Tabs.Screen name="responses" options={{ title: 'Responses' }} />
       <Tabs.Screen name="prayers" options={{ title: 'Prayer' }} />
+      {/* Reachable from Recordings and Overview, not a tab of its own. */}
+      <Tabs.Screen name="recording-form" options={{ href: null }} />
     </Tabs>
     </View>
   );

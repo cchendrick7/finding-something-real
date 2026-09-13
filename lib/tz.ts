@@ -78,3 +78,61 @@ export function inQuietHours(at: Date, tz: string): boolean {
   const h = localHour(at.toISOString(), tz);
   return h >= 21 || h < 8;
 }
+
+/* --------------------------------------------------- writing a time back */
+
+/**
+ * Offset, in ms, that `tz` was at a given UTC instant. Positive east of UTC.
+ *
+ * There is no built-in for this. The trick is to format the instant in the
+ * target zone, read the wall-clock fields back, and reinterpret them as if
+ * they were UTC — the difference is the offset that applied at that moment,
+ * which is what makes it DST-correct rather than a fixed guess.
+ */
+function zoneOffsetMs(utcMs: number, tz: string): number {
+  const p: Record<string, string> = {};
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  for (const x of fmt.formatToParts(new Date(utcMs))) p[x.type] = x.value;
+  // Some engines render midnight as hour 24 under hour12:false.
+  const hour = p.hour === '24' ? '00' : p.hour;
+  const asIfUtc = Date.UTC(
+    Number(p.year), Number(p.month) - 1, Number(p.day),
+    Number(hour), Number(p.minute), Number(p.second),
+  );
+  return asIfUtc - utcMs;
+}
+
+/**
+ * "2026-09-10" + "18:00" as wall-clock time in `tz` -> the UTC instant.
+ *
+ * Two passes, deliberately. The first guesses the offset using the wall time
+ * read as UTC; near a DST boundary that guess can land on the wrong side, so
+ * the second pass re-reads the offset at the instant we actually computed and
+ * corrects. Without it, a session scheduled the week the clocks change lands
+ * an hour out — and the people it would be wrong for are the overseas
+ * co-hosts this whole time-zone feature exists to protect.
+ */
+export function zonedToUtcIso(date: string, time: string, tz: string): string {
+  const naive = Date.parse(`${date}T${time}:00Z`);
+  if (Number.isNaN(naive)) throw new Error(`Bad date/time: ${date} ${time}`);
+  const first = naive - zoneOffsetMs(naive, tz);
+  const corrected = naive - zoneOffsetMs(first, tz);
+  return new Date(corrected).toISOString();
+}
+
+/** Inverse of zonedToUtcIso — for prefilling an edit form. */
+export function utcIsoToZonedFields(iso: string, tz: string): { date: string; time: string } {
+  const p: Record<string, string> = {};
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+  for (const x of fmt.formatToParts(new Date(iso))) p[x.type] = x.value;
+  const hour = p.hour === '24' ? '00' : p.hour;
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${hour}:${p.minute}` };
+}

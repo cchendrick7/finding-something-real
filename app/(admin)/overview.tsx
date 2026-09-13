@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { listRecordings, rsvpRoster, readStats, listAllNotes, coverageGaps, listGuests } from '@/lib/data';
+import { listRecordings, rsvpRoster, readStats, listAllNotes, coverageStatus, listGuests } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr } from '@/lib/tz';
 import { Screen, Display, H2, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button } from '@/components/ui';
 import { space, color, type } from '@/lib/theme';
@@ -27,7 +27,7 @@ export default function Overview() {
   const [stats, setStats] = useState({ total: 0, opened: 0, undelivered: 0 });
   const [yes, setYes] = useState(0);
   const [silent, setSilent] = useState(0);
-  const [gaps, setGaps] = useState<Profile[]>([]);
+  const [cover, setCover] = useState<{ waiting: Profile[]; neverAsked: Profile[] }>({ waiting: [], neverAsked: [] });
 
   useFocusEffect(useCallback(() => {
     (async () => {
@@ -42,7 +42,7 @@ export default function Overview() {
         setYes(roster.filter((x) => x.response === 'yes').length);
         setSilent(roster.filter((x) => !x.response).length);
       }
-      setGaps(await coverageGaps());
+      setCover(await coverageStatus());
     })().catch(onLoadError);
   }, []));
 
@@ -69,7 +69,10 @@ export default function Overview() {
               A draft is waiting. Add the topic and questions, then publish — nothing has
               reached the co-hosts.
             </Small>
-            <Button label="Open draft" onPress={() => router.push('/(admin)/recordings')} />
+            {/* Goes to the form, not the list. This card told leadership to add a
+                topic when there was no field anywhere to add one. */}
+            <Button label="Open draft"
+                    onPress={() => router.push(`/(admin)/recording-form?id=${d.id}`)} />
           </Card>
         );
       })}
@@ -78,11 +81,21 @@ export default function Overview() {
         <Stat n={`${stats.opened}`} label="Opened" sub={`of ${stats.total} · latest note`} />
         <Stat n={`${yes}`} label="RSVP'd yes" sub="next recording" />
       </Row>
+      {/* "Uncovered co-hosts" was one number covering two different problems.
+          A backlog is a scheduling job; silence is a phone call. */}
       <Row style={{ flexWrap: 'wrap', alignItems: 'stretch' }}>
         <Stat n={`${silent}`} label="No reply" sub="nudge goes out tonight" />
-        <Stat n={`${gaps.length}`} label="Uncovered co-hosts" sub="no question answered yet"
-              tone={gaps.length ? color.gold : undefined} />
+        <Stat n={`${cover.waiting.length}`} label="Questions waiting"
+              sub="asked, not yet on a session"
+              tone={cover.waiting.length ? color.gold : undefined} />
       </Row>
+      {cover.neverAsked.length ? (
+        <Row style={{ flexWrap: 'wrap', alignItems: 'stretch' }}>
+          <Stat n={`${cover.neverAsked.length}`} label="Haven't asked anything"
+                sub={cover.neverAsked.map((p) => p.display_name).join(', ')}
+                tone={color.blue} />
+        </Row>
+      ) : null}
 
       {stats.undelivered > 0 ? (
         <Card tone="gold">
@@ -107,7 +120,7 @@ export default function Overview() {
 
       <Eyebrow>Coming up</Eyebrow>
       {recs.filter((r) => new Date(r.scheduled_at) > new Date()).map((r) => (
-        <Card key={r.id}>
+        <Card key={r.id} onPress={() => router.push(`/(admin)/recording-form?id=${r.id}`)}>
           <Row style={{ justifyContent: 'space-between' }}>
             <Small>{formatDate(r.scheduled_at, tz)} · {formatTime(r.scheduled_at, tz)} {zoneAbbr(r.scheduled_at, tz)}</Small>
             <Pill label={r.published_at ? 'Published' : 'Draft'} tone={r.published_at ? 'ink' : 'plain'} />

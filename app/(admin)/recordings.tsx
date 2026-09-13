@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
 import { listRecordings, listGuests, listMembers, publishRecording } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr, isUnsociable } from '@/lib/tz';
@@ -11,6 +11,7 @@ import { onLoadError } from '@/lib/loadError';
 
 export default function Recordings() {
   const { profile } = useSession();
+  const router = useRouter();
   const [recs, setRecs] = useState<Recording[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [members, setMembers] = useState<Profile[]>([]);
@@ -36,6 +37,23 @@ export default function Recordings() {
       <Display>Recordings</Display>
       <Rule style={{ marginVertical: space.md }} />
 
+      <Button
+        testID="new-recording"
+        label="Add a session"
+        onPress={() => router.push('/(admin)/recording-form')}
+      />
+      <Tiny style={{ marginTop: 8, marginBottom: space.lg }}>
+        Sessions you add start as drafts. Calendly bookings land here as drafts too —
+        either way nothing reaches the co-hosts until you publish it.
+      </Tiny>
+
+      {recs.length === 0 ? (
+        <Card tone="wash">
+          <Eyebrow>Nothing scheduled</Eyebrow>
+          <Small>Add the first session of the season and it will appear here as a draft.</Small>
+        </Card>
+      ) : null}
+
       {recs.map((r) => {
         const g = guests.find((x) => x.id === r.guest_id);
         const bad = clashes(r.scheduled_at);
@@ -58,15 +76,33 @@ export default function Recordings() {
               </Card>
             ) : null}
 
+            {/* Was labelled "Late for 3", which a tester had to ask about. Say the
+                thing instead: these people are asleep at this hour. */}
             {bad.length ? (
               <Card tone="gold" style={{ marginTop: space.md, marginBottom: 0 }}>
-                <Eyebrow tone="#8A6D28">Late for {bad.length}</Eyebrow>
+                <Eyebrow tone="#8A6D28">
+                  {bad.length === 1 ? '1 co-host would be woken up' : `${bad.length} co-hosts would be woken up`}
+                </Eyebrow>
                 <Body>
                   {bad.map((m) => `${m.display_name} — ${formatTime(r.scheduled_at, m.timezone)} ${zoneAbbr(r.scheduled_at, m.timezone)}`).join(' · ')}
                 </Body>
-                <Tiny style={{ marginTop: 6 }}>They can still submit a question instead.</Tiny>
+                <Tiny style={{ marginTop: 6 }}>
+                  That is between 10pm and 6am where they live. They can send a question
+                  instead of attending.
+                </Tiny>
               </Card>
             ) : null}
+
+            <Row style={{ marginTop: space.md }}>
+              <Tiny
+                testID={`edit-${r.id}`}
+                onPress={() => router.push(`/(admin)/recording-form?id=${r.id}`)}
+                style={{
+                  borderWidth: 1, borderColor: color.line, borderRadius: 999,
+                  paddingVertical: 6, paddingHorizontal: 12, color: color.ink,
+                }}
+              >{isDraft ? 'Edit details' : 'Edit'}</Tiny>
+            </Row>
 
             {isDraft ? (
               <View style={{ marginTop: space.md }}>
