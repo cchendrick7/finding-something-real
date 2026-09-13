@@ -1,0 +1,592 @@
+/**
+ * Data access layer.
+ *
+ * One API, two backends. In DEMO_MODE it reads mutable in-memory fixtures and
+ * deliberately re-implements the privacy rules, so a reviewer clicking through
+ * the demo sees exactly what the deployed backend allows. Otherwise it calls
+ * AWS — and note the asymmetry:
+ *
+ *   Co-hosts  → custom queries only (listSessions, listAttendees, …). The
+ *               member-api Lambda applies every value-based rule.
+ *   Leadership → direct model access, which the AppSync authorization rules
+ *               restrict to the `leadership` Cognito group.
+ *
+ * If you find yourself adding a model call on a co-host path, stop: that is
+ * the mistake this whole design exists to prevent.
+ */
+import { DEMO_MODE, client } from './amplify';
+import * as fx from './demo';
+import type {
+  Profile, Recording, Rsvp, Note, Guest, Question, IntakeQuestion,
+  PrayerRequest, Episode, FsrEvent, Receipt, QuestionLink,
+} from './types';
+
+export { DEMO_MODE };
+
+// Mutable copies so demo interactions persist for the session.
+const db = {
+  profiles: [...fx.profiles],
+  recordings: fx.recordings.map((r) => ({ ...r })),
+  rsvps: fx.rsvps.map((r) => ({ ...r })),
+  notes: fx.notes.map((n) => ({ ...n })),
+  guests: fx.guests.map((g) => ({ ...g })),
+  questions: fx.questions.map((q) => ({ ...q })),
+  intake: fx.intakeQuestions.map((q) => ({ ...q })),
+  links: fx.questionLinks.map((l) => ({ ...l })),
+  prayers: fx.prayerRequests.map((p) => ({ ...p })),
+  receipts: fx.receipts.map((r) => ({ ...r })),
+  episodes: [...fx.episodes],
+  events: [...fx.events],
+  memberships: [...fx.memberships],
+};
+
+const nowIso = () => new Date().toISOString();
+const uid = () => `id-${Math.random().toString(36).slice(2, 10)}`;
+const unwrap = <T,>(r: { data?: T | null }): T | null => (r?.data ?? null);
+const unwrapList = <T,>(r: { data?: T[] | null }): T[] => (r?.data ?? []);
+
+/**
+ * Paginating list.
+ *
+ * DynamoDB's Limit caps rows SCANNED, not rows returned after the filter is
+ * applied — so a filtered list can come back EMPTY while the row exists, and a
+ * short one is not a signal that there is nothing more. This bit us twice:
+ * once in member-api (`limit: 1` reading the caller's own profile) and once in
+ * getMyRsvp, where an RSVP wrote successfully and then read back as "no answer
+ * yet", which looked like the button was broken.
+ *
+ * Never call `.list()` with a filter directly. Use this.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type AnyList = (a?: any) => Promise<{ data?: any[] | null; nextToken?: string | null }>;
+
+async function listAll<F extends AnyList>(
+  fn: F,
+  args: Omit<NonNullable<Parameters<F>[0]>, 'nextToken'>,
+): Promise<NonNullable<Awaited<ReturnType<F>>['data']>> {
+  const out: any[] = [];
+  let nextToken: string | null | undefined;
+  let pages = 0;
+  do {
+    const r = await fn({ limit: 1000, ...args, nextToken });
+    out.push(...(r?.data ?? []));
+    nextToken = r?.nextToken;
+  } while (nextToken && ++pages < 20); // 20k rows is far past this ministry's scale
+  return out;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/* ------------------------------------------------------------------ people */
+
+type ProfileModel = {
+  id: string; email?: string | null; displayName: string;
+  role?: string | null; timezone?: string | null; status?: string | null;
+};
+
+function fromProfileModel(p: ProfileModel): Profile {
+  return {
+    id: p.id,
+    display_name: p.displayName,
+    role: (p.role ?? 'member') as Profile['role'],
+    timezone: p.timezone ?? 'America/Los_Angeles',
+    status: p.status ?? 'active',
+    email: p.email ?? undefined,
+  };
+}
+
+/**
+ * The signed-in user's own row, resolved from their Cognito `sub`.
+ *
+ * Profile.id is a DynamoDB uuid, NOT the sub — the two are different values,
+ * which is the thing that made the Supabase code (where profiles.id WAS the
+ * auth id) unportable. `owner` carries the sub.
+ *
+ * limit is deliberately large: DynamoDB's Limit caps rows SCANNED, not rows
+ * returned after the filter. A small limit here scans one unrelated row,
+ * discards it, and reports "no such member". Same trap as member-api.
+ */
+export async function getMyProfile(sub: string): Promise<Profile | null> {
+  if (DEMO_MODE) return null;
+  const rows = await listAll(client.models.Profile.list, {
+    filter: { owner: { contains: sub } },
+  });
+  return rows[0] ? fromProfileModel(rows[0] as ProfileModel) : null;
+}
+
+export async function getProfile(id: string): Promise<Profile | null> {
+  if (DEMO_MODE) return db.profiles.find((p) => p.id === id) ?? null;
+  const p = unwrap(await client.models.Profile.get({ id }));
+  return p ? fromProfileModel(p) : null;
+}
+
+/** Leadership only. Co-hosts get names via listAttendees, never the roster. */
+export async function listMembers(): Promise<Profile[]> {
+  if (DEMO_MODE) return db.profiles.filter((p) => p.status === 'active');
+  return unwrapList(await client.models.Profile.list({ limit: 200 })).map(fromProfileModel);
+}
+
+export async function updateMyProfile(
+  id: string, patch: Partial<Pick<Profile, 'display_name' | 'timezone'>>,
+) {
+  if (DEMO_MODE) {
+    const p = db.profiles.find((x) => x.id === id);
+    if (p) Object.assign(p, patch);
+    return;
+  }
+  // Through the Lambda, not the model. Direct Profile.update was writable by
+  // the owner, which meant status and role were too — a pending account could
+  // activate itself. The mutation only accepts these two fields.
+  await client.mutations.updateMyProfile({
+    displayName: patch.display_name ?? null,
+    timezone: patch.timezone ?? null,
+  });
+}
+
+/* -------------------------------------------------------------- recordings */
+
+export async function listRecordings(isAdmin: boolean): Promise<Recording[]> {
+  if (DEMO_MODE) {
+    return db.recordings
+      .filter((r) => isAdmin || r.published_at)
+      .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+  }
+  if (isAdmin) {
+    const rows = unwrapList(await client.models.Recording.list({ limit: 500 }));
+    return rows
+      .map(fromRecordingModel)
+      .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+  }
+  // Co-host path: the Lambda has already filtered to published.
+  const rows = unwrapList(await client.queries.listSessions());
+  return rows.map(fromSessionView);
+}
+
+export async function getRecording(id: string): Promise<Recording | null> {
+  if (DEMO_MODE) return db.recordings.find((r) => r.id === id) ?? null;
+  const view = unwrap(await client.queries.getSession({ id }));
+  return view ? fromSessionView(view) : null;
+}
+
+export async function publishRecording(id: string, announceAt: string | null) {
+  if (DEMO_MODE) {
+    const r = db.recordings.find((x) => x.id === id);
+    if (r) {
+      r.published_at = nowIso();
+      r.announce_at = announceAt;
+      r.announced_at = announceAt ? null : nowIso();
+    }
+    return;
+  }
+  await client.models.Recording.update({
+    id, publishedAt: nowIso(), announceAt,
+    announcedAt: announceAt ? null : nowIso(),
+  });
+}
+
+/* -------------------------------------------------------------------- RSVP */
+
+/**
+ * SPEC §5.3 — only people who said YES. On AWS this is structural: an
+ * Attendee row exists solely for a yes, so a decline has nothing to leak.
+ */
+export async function listAttendees(recordingId: string): Promise<Profile[]> {
+  if (DEMO_MODE) {
+    const yes = db.rsvps.filter((r) => r.recording_id === recordingId && r.response === 'yes');
+    return yes
+      .map((r) => db.profiles.find((p) => p.id === r.profile_id))
+      .filter((p): p is Profile => Boolean(p));
+  }
+  const rows = unwrapList(await client.queries.sessionAttendees({ recordingId }));
+  return rows.map((r) => ({
+    id: String(r?.id ?? ''),
+    display_name: String(r?.displayName ?? ''),
+    role: 'member' as const,
+    timezone: r?.timezone ?? 'America/Los_Angeles',
+    status: 'active',
+  }));
+}
+
+export async function getMyRsvp(recordingId: string, me: string): Promise<Rsvp | null> {
+  if (DEMO_MODE) {
+    return db.rsvps.find((r) => r.recording_id === recordingId && r.profile_id === me) ?? null;
+  }
+  const rows = await listAll(client.models.Rsvp.list, {
+    filter: { profileId: { eq: me }, recordingId: { eq: recordingId } },
+  });
+  const r = rows[0];
+  return r ? {
+    profile_id: r.profileId, recording_id: r.recordingId,
+    response: (r.response ?? 'no') as 'yes' | 'no',
+    note: r.note ?? null, responded_at: r.respondedAt ?? nowIso(),
+  } : null;
+}
+
+/**
+ * Returns the resulting RSVP. Callers should use it rather than re-reading —
+ * AppSync list reads are eventually consistent, so a read-back issued straight
+ * after this write can return the previous answer.
+ */
+export async function setRsvp(
+  recordingId: string, me: string, response: 'yes' | 'no', note?: string,
+): Promise<Rsvp> {
+  const row: Rsvp = {
+    profile_id: me, recording_id: recordingId, response,
+    note: note ?? null, responded_at: nowIso(),
+  };
+  if (DEMO_MODE) {
+    const existing = db.rsvps.find((r) => r.recording_id === recordingId && r.profile_id === me);
+    if (existing) Object.assign(existing, { response, note, responded_at: row.responded_at });
+    else db.rsvps.push({ ...row });
+    return row;
+  }
+  // Goes through the Lambda so Rsvp and Attendee can never disagree, and so a
+  // client cannot forge attendance by writing an Attendee row directly.
+  await client.mutations.submitRsvp({ recordingId, response, note: note ?? null });
+  return row;
+}
+
+/** Admin view: the full roster including declines and silence. */
+export async function rsvpRoster(recordingId: string) {
+  const members = (await listMembers()).filter((m) => m.role === 'member');
+  let rows: Rsvp[] = [];
+  let reads: Receipt[] = [];
+
+  if (DEMO_MODE) {
+    rows = db.rsvps.filter((r) => r.recording_id === recordingId);
+    reads = db.receipts.filter((r) => r.target_type === 'note');
+  } else {
+    rows = (await listAll(client.models.Rsvp.list, {
+      filter: { recordingId: { eq: recordingId } },
+    })).map((r) => ({
+      profile_id: r.profileId, recording_id: r.recordingId,
+      response: (r.response ?? 'no') as 'yes' | 'no',
+      note: r.note ?? null, responded_at: r.respondedAt ?? '',
+    }));
+    reads = (await listAll(client.models.Receipt.list, {
+      filter: { targetType: { eq: 'note' } },
+    })).map((r) => ({
+      id: r.id, profile_id: r.profileId, target_type: 'note',
+      target_id: r.targetId, delivered_at: r.deliveredAt ?? null, opened_at: r.openedAt ?? null,
+    }));
+  }
+
+  return members.map((m) => {
+    const rsvp = rows.find((r) => r.profile_id === m.id) ?? null;
+    const receipt = reads.find((r) => r.profile_id === m.id) ?? null;
+    return {
+      member: m,
+      response: rsvp?.response ?? null,
+      respondedAt: rsvp?.responded_at ?? null,
+      note: rsvp?.note ?? null,
+      deliveredAt: receipt?.delivered_at ?? null,
+      openedAt: receipt?.opened_at ?? null,
+    };
+  });
+}
+
+/* ------------------------------------------------------------------- notes */
+
+export async function listNotesFor(me: string): Promise<Note[]> {
+  if (DEMO_MODE) {
+    const mine = db.memberships.filter((m) => m.profile_id === me);
+    const isCohort = mine.some((m) => m.kind === 'cohort');
+    const isAlum = mine.some((m) => m.kind === 'alum');
+    return db.notes
+      .filter((n) => n.published_at)
+      .filter((n) =>
+        n.audience === 'all' ||
+        (n.audience === 'cohort' && isCohort) ||
+        (n.audience === 'alumni' && isAlum) ||
+        (n.audience === 'custom' && n.recipient_ids.includes(me)))
+      .sort((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''));
+  }
+  // Audience targeting is resolved server-side.
+  return unwrapList(await client.queries.myNotes()).map((n) => ({
+    id: String(n?.id), title: String(n?.title), body: String(n?.body),
+    link_url: n?.linkUrl ?? null, link_label: n?.linkLabel ?? null,
+    author_id: null, audience: 'all' as const, recipient_ids: [],
+    published_at: n?.publishedAt ?? null,
+  }));
+}
+
+export async function listAllNotes(): Promise<Note[]> {
+  if (DEMO_MODE) {
+    return [...db.notes].sort((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''));
+  }
+  return unwrapList(await client.models.Note.list({ limit: 200 }))
+    .map((n) => ({
+      id: n.id, title: n.title, body: n.body,
+      link_url: n.linkUrl ?? null, link_label: n.linkLabel ?? null,
+      author_id: n.authorId ?? null,
+      audience: (n.audience ?? 'all') as Note['audience'],
+      recipient_ids: (n.recipientIds ?? []).filter(Boolean) as string[],
+      published_at: n.publishedAt ?? null,
+    }))
+    .sort((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''));
+}
+
+export async function createNote(n: Omit<Note, 'id'>): Promise<Note> {
+  const row = { ...n, id: uid() } as Note;
+  if (DEMO_MODE) { db.notes.unshift(row); return row; }
+  const res = await client.models.Note.create({
+    title: n.title, body: n.body,
+    linkUrl: n.link_url ?? null, linkLabel: n.link_label ?? null,
+    authorId: n.author_id ?? null, audience: n.audience,
+    recipientIds: n.recipient_ids, publishedAt: n.published_at ?? null,
+  });
+  return (unwrap(res) ? { ...row, id: unwrap(res)!.id } : row);
+}
+
+/** Personalises {first_name} on group sends. Spec §5.6. */
+export function renderNoteBody(body: string, name: string): string {
+  return body.replace(/\{first_name\}/g, name);
+}
+
+export async function unreadNoteFor(me: string): Promise<Note | null> {
+  if (!DEMO_MODE) {
+    const rows = unwrapList(await client.queries.myNotes());
+    const first = rows.find((n) => !n?.read);
+    return first ? {
+      id: String(first.id), title: String(first.title), body: String(first.body),
+      link_url: first.linkUrl ?? null, link_label: first.linkLabel ?? null,
+      author_id: null, audience: 'all', recipient_ids: [],
+      published_at: first.publishedAt ?? null,
+    } : null;
+  }
+  const all = await listNotesFor(me);
+  const read = db.receipts.filter((r) => r.profile_id === me && r.target_type === 'note' && r.opened_at);
+  const readIds = new Set(read.map((r) => r.target_id));
+  return all.find((n) => !readIds.has(n.id)) ?? null;
+}
+
+export async function markRead(me: string, targetType: string, targetId: string) {
+  if (DEMO_MODE) {
+    const found = db.receipts.find(
+      (r) => r.profile_id === me && r.target_type === targetType && r.target_id === targetId);
+    if (found) found.opened_at = nowIso();
+    else db.receipts.push({
+      id: uid(), profile_id: me, target_type: targetType, target_id: targetId,
+      delivered_at: nowIso(), opened_at: nowIso(),
+    });
+    return;
+  }
+  await client.mutations.markRead({ targetType, targetId });
+}
+
+export async function readStats(noteId: string) {
+  const members = (await listMembers()).filter((m) => m.role === 'member');
+  const rs: Receipt[] = DEMO_MODE
+    ? db.receipts.filter((r) => r.target_type === 'note' && r.target_id === noteId)
+    : (await listAll(client.models.Receipt.list, {
+        filter: { targetType: { eq: 'note' }, targetId: { eq: noteId } },
+      })).map((r) => ({
+        id: r.id, profile_id: r.profileId, target_type: 'note', target_id: r.targetId,
+        delivered_at: r.deliveredAt ?? null, opened_at: r.openedAt ?? null,
+      }));
+  const opened = rs.filter((r) => r.opened_at).length;
+  const undelivered = members.filter((m) => !rs.find((r) => r.profile_id === m.id && r.delivered_at)).length;
+  return { total: members.length, opened, undelivered };
+}
+
+/* --------------------------------------------------------------- questions */
+
+export async function submitQuestion(me: string, recordingId: string, body: string) {
+  if (DEMO_MODE) {
+    db.questions.push({ id: uid(), profile_id: me, recording_id: recordingId, body, submitted_at: nowIso() });
+    return;
+  }
+  // profileId is set server-side from the caller. Passing it from here let a
+  // co-host file a question under a peer's name.
+  await client.mutations.submitQuestion({ recordingId, body });
+}
+
+export async function listQuestions(): Promise<(Question & { author?: Profile })[]> {
+  const people = await listMembers();
+  const rows: Question[] = DEMO_MODE
+    ? db.questions
+    : unwrapList(await client.models.Question.list({ limit: 500 })).map((q) => ({
+        id: q.id, profile_id: q.profileId, recording_id: q.recordingId,
+        body: q.body, submitted_at: q.createdAt ?? nowIso(),
+      }));
+  return rows.map((q) => ({ ...q, author: people.find((p) => p.id === q.profile_id) }));
+}
+
+export async function listIntake(): Promise<(IntakeQuestion & { author?: Profile; recordings: string[] })[]> {
+  const people = await listMembers();
+  let rows: IntakeQuestion[];
+  let links: QuestionLink[];
+  if (DEMO_MODE) {
+    rows = db.intake; links = db.links;
+  } else {
+    rows = unwrapList(await client.models.IntakeQuestion.list({ limit: 500 })).map((q) => ({
+      id: q.id, profile_id: q.profileId, season_id: q.seasonId, body: q.body,
+      kind: (q.kind ?? 'question') as IntakeQuestion['kind'],
+      source: (q.source ?? 'form') as IntakeQuestion['source'],
+      submitted_at: q.createdAt ?? nowIso(),
+    }));
+    links = unwrapList(await client.models.QuestionLink.list({ limit: 500 })).map((l) => ({
+      intake_question_id: l.intakeQuestionId, recording_id: l.recordingId,
+      assigned_at: l.createdAt ?? nowIso(),
+    }));
+  }
+  return rows.map((q) => ({
+    ...q,
+    author: people.find((p) => p.id === q.profile_id),
+    recordings: links.filter((l) => l.intake_question_id === q.id).map((l) => l.recording_id),
+  }));
+}
+
+export async function assignIntake(intakeId: string, recordingId: string) {
+  if (DEMO_MODE) {
+    if (!db.links.find((l) => l.intake_question_id === intakeId && l.recording_id === recordingId)) {
+      db.links.push({ intake_question_id: intakeId, recording_id: recordingId, assigned_at: nowIso() });
+    }
+    return;
+  }
+  await client.models.QuestionLink.create({ intakeQuestionId: intakeId, recordingId });
+}
+
+/** "This one came from your question." Populated server-side for co-hosts. */
+export async function myQuestionForRecording(me: string, recordingId: string): Promise<IntakeQuestion | null> {
+  if (DEMO_MODE) {
+    const links = db.links.filter((l) => l.recording_id === recordingId);
+    const ids = new Set(links.map((l) => l.intake_question_id));
+    return db.intake.find((q) => q.profile_id === me && ids.has(q.id)) ?? null;
+  }
+  const view = unwrap(await client.queries.getSession({ id: recordingId }));
+  return view?.yourQuestion
+    ? {
+        id: 'linked', profile_id: me, season_id: '', body: String(view.yourQuestion),
+        kind: 'question', source: 'retreat', submitted_at: nowIso(),
+      }
+    : null;
+}
+
+export async function coverageGaps(): Promise<Profile[]> {
+  const intake = await listIntake();
+  const members = (await listMembers()).filter((m) => m.role === 'member');
+  const covered = new Set(intake.filter((q) => q.recordings.length > 0).map((q) => q.profile_id));
+  return members.filter((m) => !covered.has(m.id));
+}
+
+/* ----------------------------------------------------------------- prayers */
+
+export async function submitPrayer(me: string, body: string) {
+  if (DEMO_MODE) {
+    db.prayers.unshift({ id: uid(), profile_id: me, body, status: 'open', submitted_at: nowIso() });
+    return;
+  }
+  // Same reason as submitQuestion: the caller's identity decides profileId.
+  await client.mutations.submitPrayerRequest({ body });
+}
+
+/** Leadership only. There is deliberately no co-host-facing query for these. */
+export async function listPrayers(): Promise<(PrayerRequest & { author?: Profile })[]> {
+  const people = await listMembers();
+  const rows: PrayerRequest[] = DEMO_MODE
+    ? db.prayers
+    : unwrapList(await client.models.PrayerRequest.list({ limit: 500 })).map((p) => ({
+        id: p.id, profile_id: p.profileId, body: p.body,
+        status: p.status ?? 'open', submitted_at: p.createdAt ?? nowIso(),
+      }));
+  return rows
+    .sort((a, b) => b.submitted_at.localeCompare(a.submitted_at))
+    .map((p) => ({ ...p, author: people.find((x) => x.id === p.profile_id) }));
+}
+
+/* -------------------------------------------------------------------- misc */
+
+export async function listGuests(): Promise<Guest[]> {
+  if (DEMO_MODE) return db.guests;
+  return unwrapList(await client.models.Guest.list({ limit: 200 })).map((g) => ({
+    id: g.id, name: g.name, photo_url: g.photoUrl ?? null, blurb: g.blurb ?? null,
+    external_url: g.externalUrl ?? null, returning_override: g.returningOverride ?? null,
+    admin_notes: g.adminNotes ?? null,
+  }));
+}
+
+export async function getGuest(id: string | null): Promise<Guest | null> {
+  if (!id) return null;
+  if (DEMO_MODE) return db.guests.find((g) => g.id === id) ?? null;
+  const g = unwrap(await client.models.Guest.get({ id }));
+  return g ? {
+    id: g.id, name: g.name, photo_url: g.photoUrl ?? null, blurb: g.blurb ?? null,
+    external_url: g.externalUrl ?? null, returning_override: g.returningOverride ?? null,
+    admin_notes: g.adminNotes ?? null,
+  } : null;
+}
+
+export async function guestIsReturning(g: Guest): Promise<boolean> {
+  if (g.returning_override !== null && g.returning_override !== undefined) return g.returning_override;
+  const recs = await listRecordings(false);
+  return recs.filter((r) => r.guest_id === g.id).length > 1;
+}
+
+export async function listEpisodes(): Promise<Episode[]> {
+  if (DEMO_MODE) return db.episodes;
+  return unwrapList(await client.queries.publishedEpisodes()).map((e) => ({
+    id: String(e?.id), title: String(e?.title), url: e?.url ?? null,
+    number: e?.number ?? null, published_at: e?.publishedAt ?? null,
+  }));
+}
+
+export async function listEvents(): Promise<FsrEvent[]> {
+  if (DEMO_MODE) return db.events;
+  return unwrapList(await client.models.EventItem.list({ limit: 200 }))
+    .filter((e) => Boolean(e.publishedAt))
+    .map((e) => ({
+      id: e.id, title: e.title, kind: e.kind ?? 'gathering',
+      starts_at: e.startsAt, ends_at: e.endsAt ?? null,
+      location: e.location ?? null, description: e.description ?? null,
+      published_at: e.publishedAt ?? null,
+    }));
+}
+
+/* ------------------------------------------------------------- converters */
+
+type RecordingModel = {
+  id: string; seasonId: string; guestId?: string | null; title: string;
+  topic?: string | null; questionsCovered?: string | null; description?: string | null;
+  scheduledAt: string; durationMinutes?: number | null; joinUrl?: string | null;
+  publishedAt?: string | null; announceAt?: string | null; announcedAt?: string | null;
+  source?: string | null; calendlyEventId?: string | null;
+};
+
+function fromRecordingModel(r: RecordingModel): Recording {
+  return {
+    id: r.id, season_id: r.seasonId, guest_id: r.guestId ?? null, title: r.title,
+    topic: r.topic ?? null, questions_covered: r.questionsCovered ?? null,
+    description: r.description ?? null, scheduled_at: r.scheduledAt,
+    duration_minutes: r.durationMinutes ?? 90, join_url: r.joinUrl ?? null,
+    published_at: r.publishedAt ?? null, announce_at: r.announceAt ?? null,
+    announced_at: r.announcedAt ?? null,
+    source: (r.source ?? 'manual') as Recording['source'],
+    calendly_event_id: r.calendlyEventId ?? null,
+  };
+}
+
+type SessionViewShape = {
+  id?: string | null; title?: string | null; topic?: string | null;
+  questionsCovered?: string | null; scheduledAt?: string | null;
+  durationMinutes?: number | null; joinUrl?: string | null;
+  guestName?: string | null; guestBlurb?: string | null; guestUrl?: string | null;
+  guestReturning?: boolean | null; attendeeCount?: number | null;
+  yourQuestion?: string | null;
+};
+
+/**
+ * A SessionView is already filtered and flattened by the Lambda — it never
+ * carries publishedAt (everything returned is published) or the guest's
+ * private admin notes.
+ */
+function fromSessionView(v: SessionViewShape | null | undefined): Recording {
+  return {
+    id: String(v?.id ?? ''), season_id: '', guest_id: v?.guestName ? `inline:${v.guestName}` : null,
+    title: String(v?.title ?? ''), topic: v?.topic ?? null,
+    questions_covered: v?.questionsCovered ?? null, description: null,
+    scheduled_at: String(v?.scheduledAt ?? ''), duration_minutes: v?.durationMinutes ?? 90,
+    join_url: v?.joinUrl ?? null,
+    published_at: 'published', announce_at: null, announced_at: null,
+    source: 'manual', calendly_event_id: null,
+  };
+}
