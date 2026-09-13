@@ -21,8 +21,8 @@ for (const r of recs.filter((x) => /UNPUBLISHED/i.test(x.title) && x.publishedAt
   log(`unpublishing "${r.title.slice(0, 28)}"`,
     await gql(lead, `mutation { updateRecording(input: { id: "${r.id}", publishedAt: null }) { id } }`));
 }
-// Probe fixtures the suite created on a previous run.
-for (const r of recs.filter((x) => /UNPUBLISHED probe/i.test(x.title))) {
+// Probe fixtures left by the suites and by production smoke checks.
+for (const r of recs.filter((x) => /UNPUBLISHED probe|PROBE from suite|PROD CHECK|^QA /i.test(x.title))) {
   log(`deleting probe recording`,
     await gql(lead, `mutation { deleteRecording(input: { id: "${r.id}" }) { id } }`));
 }

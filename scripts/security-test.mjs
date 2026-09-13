@@ -252,6 +252,30 @@ async function main() {
   }`);
   ok(denied(pubDraft, 'updateRecording'), 'co-host cannot publish a draft recording');
 
+  /* --------------------------------------------- scheduling is leadership's
+   * The admin portal can now create and edit sessions directly. That is a new
+   * write surface, so it gets attacked like every other one: a co-host must
+   * not be able to put a session on the season's calendar, rename someone
+   * else's, invent a guest, or even read the season list.
+   */
+  const cohostMake = await gql(cohost, `mutation {
+    createRecording(input: { seasonId: "x", title: "FORGED", scheduledAt: "2027-01-01T00:00:00Z", source: manual }) { id }
+  }`);
+  ok(denied(cohostMake, 'createRecording'), 'co-host cannot schedule a session');
+
+  const cohostEdit = await gql(cohost, `mutation {
+    updateRecording(input: { id: "${pub.id}", title: "FORGED" }) { id }
+  }`);
+  ok(denied(cohostEdit, 'updateRecording'), "co-host cannot rename a session");
+
+  const cohostGuest = await gql(cohost, `mutation {
+    createGuest(input: { name: "FORGED" }) { id }
+  }`);
+  ok(denied(cohostGuest, 'createGuest'), 'co-host cannot invent a guest');
+
+  ok(denied(await gql(cohost, L('listSeasons', 'id name')), 'listSeasons'),
+     'co-host cannot list seasons');
+
   console.log('\n=============== AS A PENDING ACCOUNT (Stranger) ===============');
   // The AWS equivalent of the worst Postgres bug: any signup becoming a member.
   const sSessions = await gql(nobody, `query { listSessions { id title } }`);
@@ -274,6 +298,35 @@ async function main() {
   ok(txt(lg).includes('LEADERSHIP ONLY'), 'leadership CAN read guest admin notes');
   const lrs = await gql(lead, L('listRsvps', 'id response note'));
   ok(items(lrs, 'listRsvps').some((r) => r.response === 'no'), 'leadership CAN see declines');
+
+  // The portal's new create/edit path, proven end to end and cleaned up after.
+  const seasons = items(await gql(lead, L('listSeasons', 'id isCurrent')), 'listSeasons');
+  const seasonId = (seasons.find((x) => x.isCurrent) ?? seasons[0] ?? {}).id;
+  ok(Boolean(seasonId), 'leadership CAN read the season list');
+
+  const made = await gql(lead, `mutation {
+    createRecording(input: {
+      seasonId: "${seasonId}", title: "PROBE from suite",
+      scheduledAt: "2027-02-11T02:00:00Z", durationMinutes: 90, source: manual
+    }) { id publishedAt }
+  }`);
+  const madeId = made.data?.createRecording?.id;
+  ok(Boolean(madeId), 'leadership CAN schedule a session from the portal');
+  ok(made.data?.createRecording?.publishedAt == null,
+     'a session created in the portal starts UNPUBLISHED');
+
+  if (madeId) {
+    const edited = await gql(lead, `mutation {
+      updateRecording(input: { id: "${madeId}", topic: "edited", questionsCovered: "a" }) { topic }
+    }`);
+    ok(edited.data?.updateRecording?.topic === 'edited',
+       'leadership CAN edit the topic — the thing Overview always told them to do');
+
+    const hidden = await gql(cohost, `query { getSession(id: "${madeId}") { id } }`);
+    ok(hidden.data?.getSession === null, 'the new session is invisible to co-hosts until published');
+
+    await gql(lead, `mutation { deleteRecording(input: { id: "${madeId}" }) { id } }`);
+  }
 
   console.log('\n======================= RESULTS =======================');
   pass.forEach((m) => console.log('  PASS ', m));
