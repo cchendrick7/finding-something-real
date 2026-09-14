@@ -120,10 +120,20 @@ async function main() {
   ok(JSON.stringify(draftViaApi.data) === JSON.stringify(fakeId.data),
      'a draft is INDISTINGUISHABLE from a nonexistent id');
 
-  // --- the member-facing API returns published only ---
+  /* --------------------------- the member-facing API returns published only
+   * Assert the PROPERTY, not the seed's row count. This read `list.length === 1`
+   * and started failing the moment leadership published a second recording
+   * through the new editor — a green feature reported as a red test. The
+   * security question was never "how many are there"; it is whether anything
+   * unpublished got through.
+   */
   const sessions = await gql(cohost, `query { listSessions { id title guestName } }`);
   const list = sessions.data?.listSessions ?? [];
-  ok(list.length === 1, `listSessions returns only published (${list.length})`);
+  const publishedIds = new Set(recs.filter((r) => r.publishedAt).map((r) => r.id));
+  ok(list.length > 0, `listSessions returns something (${list.length})`);
+  ok(list.every((s) => publishedIds.has(s.id)),
+     'every session a co-host can see is published');
+  ok(!list.some((s) => s.id === draft.id), 'the draft is not among them');
   ok(!txt(sessions).includes('UNPUBLISHED'), 'no draft title leaks into listSessions');
   ok(!txt(sessions).includes('SECRET'), 'no draft joinUrl leaks into listSessions');
   ok(!txt(sessions).includes('LEADERSHIP ONLY'), 'guest adminNotes never reach a co-host');
