@@ -21,6 +21,20 @@ export const memberApi = defineFunction({
   timeoutSeconds: 20,
 });
 
+/**
+ * Keeps PublicEpisode in step with the ministry's YouTube channel.
+ *
+ * Runs on a schedule rather than on demand: the public screens must render
+ * instantly for a stranger who just installed the app, and must not depend on
+ * YouTube being reachable at that moment.
+ */
+export const youtubeSync = defineFunction({
+  name: 'youtube-sync',
+  entry: './../functions/youtube-sync/handler.ts',
+  timeoutSeconds: 60,
+  schedule: 'every 2h',
+});
+
 /** Shapes returned to co-hosts. Deliberately narrower than the models. */
 const PublicProfile = a.customType({
   id: a.string(),
@@ -334,6 +348,49 @@ const schema = a
       })
       .authorization((allow) => [allow.group('leadership')]),
 
+    /* ------------------------------------------------- the public surface */
+
+    /**
+     * THE ONLY MODEL AN ANONYMOUS VISITOR CAN READ.
+     *
+     * The App Store will not approve an app whose every screen sits behind an
+     * invitation-only login (Guideline 4.2, and 5.1.1(v)). So the app needs a
+     * public half — and that means the first unauthenticated door into a
+     * backend whose entire design is that co-hosts cannot reach each other's
+     * data.
+     *
+     * Two rules hold that door shut:
+     *
+     *   1. NOTHING PRIVATE LIVES HERE. Every field below is already public on
+     *      YouTube. There is no profileId, no email, no join URL, no
+     *      relationship to a Recording, a Season or a co-host. If a future
+     *      field cannot be read aloud from a stage, it does not belong in this
+     *      model — put it on Episode, which stays leadership-only.
+     *   2. GUEST ACCESS IS READ, AND ONLY HERE. `allow.guest()` appears
+     *      exactly once in this file. Writes come from the youtube-sync
+     *      function or from leadership. An anonymous caller that can write is
+     *      an anonymous caller that can deface the ministry's front page.
+     *
+     * scripts/security-test.mjs signs in as nobody at all and proves both.
+     */
+    PublicEpisode: a
+      .model({
+        videoId: a.string().required(),
+        title: a.string().required(),
+        url: a.string().required(),
+        thumbnailUrl: a.string(),
+        publishedAt: a.datetime().required(),
+        // YouTube shorts and full episodes share a feed; the app lists them
+        // separately so the episode list is not drowned in clips.
+        kind: a.enum(['episode', 'short']),
+        blurb: a.string(),
+      })
+      .authorization((allow) => [
+        allow.guest().to(['read']),
+        allow.authenticated().to(['read']),
+        allow.group('leadership'),
+      ]),
+
     /* ------------------------------------------------- member-facing API */
     /* Everything a co-host can do. Each one filters on values the model
        authorization rules cannot see. */
@@ -419,13 +476,19 @@ const schema = a
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(memberApi)),
   })
-  .authorization((allow) => [allow.resource(memberApi)]);
+  .authorization((allow) => [allow.resource(memberApi), allow.resource(youtubeSync)]);
 
 export type Schema = ClientSchema<typeof schema>;
 
 export const data = defineData({
   schema,
   authorizationModes: {
+    // Still userPool by default — every private model resolves through a
+    // Cognito user token exactly as before. The identity pool needs no config
+    // here; defineAuth supplies it, and allow.guest() binds to its
+    // unauthenticated role. A client reaches it only by asking for
+    // authMode: 'identityPool', and the only thing it can reach is
+    // PublicEpisode.
     defaultAuthorizationMode: 'userPool',
   },
 });

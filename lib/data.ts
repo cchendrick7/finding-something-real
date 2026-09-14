@@ -18,7 +18,7 @@ import { DEMO_MODE, client } from './amplify';
 import * as fx from './demo';
 import type {
   Profile, Recording, Rsvp, Note, Guest, Question, IntakeQuestion,
-  PrayerRequest, Episode, FsrEvent, Receipt, QuestionLink,
+  PrayerRequest, Episode, FsrEvent, Receipt, QuestionLink, PublicEpisode,
 } from './types';
 
 export { DEMO_MODE };
@@ -140,6 +140,37 @@ export async function updateMyProfile(
     displayName: patch.display_name ?? null,
     timezone: patch.timezone ?? null,
   });
+}
+
+/* --------------------------------------------------------------- public */
+
+/**
+ * The ministry's YouTube catalogue. THE ONLY DATA PATH THAT WORKS SIGNED OUT.
+ *
+ * `authMode: 'identityPool'` is what makes that true: it asks AppSync to
+ * authorise as the identity pool's *unauthenticated* role instead of with a
+ * Cognito user token. PublicEpisode is the one model that role can touch, and
+ * it can only read. Do not reach for this auth mode anywhere else — every
+ * other model is deliberately unreachable from it, and the security suite
+ * signs in as nobody at all to prove that stays true.
+ */
+export async function listPublicEpisodes(): Promise<PublicEpisode[]> {
+  if (DEMO_MODE) {
+    return [...fx.publicEpisodes].sort((a, b) => b.published_at.localeCompare(a.published_at));
+  }
+  const rows = await listAll(client.models.PublicEpisode.list, { authMode: 'identityPool' });
+  return rows
+    .map((r) => ({
+      id: r.id,
+      video_id: r.videoId,
+      title: r.title,
+      url: r.url,
+      thumbnail_url: r.thumbnailUrl ?? null,
+      published_at: r.publishedAt,
+      kind: (r.kind ?? 'episode') as PublicEpisode['kind'],
+      blurb: r.blurb ?? null,
+    }))
+    .sort((a, b) => b.published_at.localeCompare(a.published_at));
 }
 
 /* -------------------------------------------------------------- recordings */

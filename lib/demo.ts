@@ -8,7 +8,7 @@
  */
 import type {
   Profile, Season, Guest, Recording, Rsvp, FsrEvent, Question, IntakeQuestion,
-  QuestionLink, PrayerRequest, Note, Receipt, Episode, Membership,
+  QuestionLink, PrayerRequest, Note, Receipt, Episode, Membership, PublicEpisode,
 } from './types';
 
 const S1 = 'season-fall-2026';
@@ -155,6 +155,38 @@ export const episodes: Episode[] = [
   { id: 'ep41', number: 41, title: 'Is faith just wishful thinking?', published_at: '2026-09-09T13:00:00Z', url: 'https://example.com/ep41' },
   { id: 'ep40', number: 40, title: 'What the retreat was like',       published_at: '2026-09-02T13:00:00Z', url: 'https://example.com/ep40' },
   { id: 'ep39', number: 39, title: 'Live at the Ruby Theater',        published_at: '2026-08-26T13:00:00Z', url: 'https://example.com/ep39' },
+];
+
+/** Public YouTube content. Real videos from the channel, so demo mode shows
+ *  the public screens as a stranger would actually see them. */
+export const publicEpisodes: PublicEpisode[] = [
+  { id: 'pe1', video_id: '1QV8ndYTZWs', kind: 'episode',
+    title: 'Constant Surrender with Ana & Reina', published_at: '2026-09-09T16:00:00Z',
+    url: 'https://www.youtube.com/watch?v=1QV8ndYTZWs',
+    thumbnail_url: 'https://i.ytimg.com/vi/1QV8ndYTZWs/hqdefault.jpg', blurb: null },
+  { id: 'pe2', video_id: 'Rt3f3qEdz7A', kind: 'episode',
+    title: 'FSR Season 8 - Group Session', published_at: '2026-09-02T16:00:00Z',
+    url: 'https://www.youtube.com/watch?v=Rt3f3qEdz7A',
+    thumbnail_url: 'https://i.ytimg.com/vi/Rt3f3qEdz7A/hqdefault.jpg', blurb: null },
+  { id: 'pe6', video_id: 'JLlxllJp8do', kind: 'episode',
+    title: 'Does "The One" Exist? with Tripp and Megan Almon',
+    published_at: '2026-08-26T16:00:00Z',
+    url: 'https://www.youtube.com/watch?v=JLlxllJp8do',
+    thumbnail_url: 'https://i.ytimg.com/vi/JLlxllJp8do/hqdefault.jpg', blurb: null },
+  { id: 'pe3', video_id: 'Ef0s47OjjcI', kind: 'short',
+    title: 'Seek Genuine Jesus: Bible Claims are Objectively True',
+    published_at: '2026-09-11T16:00:00Z',
+    url: 'https://www.youtube.com/watch?v=Ef0s47OjjcI',
+    thumbnail_url: 'https://i.ytimg.com/vi/Ef0s47OjjcI/hqdefault.jpg', blurb: null },
+  { id: 'pe4', video_id: 'XD-f0flMTUc', kind: 'short',
+    title: 'Marriage: A Signpost to Deeper Reality', published_at: '2026-09-10T16:00:00Z',
+    url: 'https://www.youtube.com/watch?v=XD-f0flMTUc',
+    thumbnail_url: 'https://i.ytimg.com/vi/XD-f0flMTUc/hqdefault.jpg', blurb: null },
+  { id: 'pe5', video_id: 'bG2VMxPwO-o', kind: 'short',
+    title: "Forgiveness: Christ's Sacrifice & Your New Perspective",
+    published_at: '2026-09-09T12:00:00Z',
+    url: 'https://www.youtube.com/watch?v=bG2VMxPwO-o',
+    thumbnail_url: 'https://i.ytimg.com/vi/bG2VMxPwO-o/hqdefault.jpg', blurb: null },
 ];
 
 /** Who you're signed in as in demo mode. */

@@ -88,3 +88,15 @@ export interface Invite {
   id: string; email: string; season_id: string; code: string;
   sent_at: string; expires_at: string; redeemed_at: string | null;
 }
+
+/** A YouTube upload, synced by amplify/functions/youtube-sync. Public. */
+export interface PublicEpisode {
+  id: string;
+  video_id: string;
+  title: string;
+  url: string;
+  thumbnail_url: string | null;
+  published_at: string;
+  kind: 'episode' | 'short';
+  blurb: string | null;
+}

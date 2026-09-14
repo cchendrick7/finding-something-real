@@ -1,6 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend';
 import { auth } from './auth/resource';
-import { data, memberApi } from './data/resource';
+import { data, memberApi, youtubeSync } from './data/resource';
 
 /**
  * Finding Something Real — AWS backend.
@@ -12,4 +12,4 @@ import { data, memberApi } from './data/resource';
  * The authorization design is documented in docs/AWS-AUTHZ-DESIGN.md — read it
  * before touching amplify/data/resource.ts.
  */
-export const backend = defineBackend({ auth, data, memberApi });
+export const backend = defineBackend({ auth, data, memberApi, youtubeSync });

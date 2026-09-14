@@ -105,7 +105,14 @@ draft recording, cannot see an alumni-only note, cannot forge attendance, and
 cannot promote themselves to admin — and that a *pending* account gets nothing
 at all.
 
-Four rules that must never be relaxed:
+Five rules that must never be relaxed:
+
+- **`allow.guest()` appears exactly once**, on `PublicEpisode`, read-only. That
+  model carries nothing that isn't already public on YouTube. It exists because
+  an app that is nothing but an invitation-only login does not get approved
+  (App Review 4.2, 5.1.1(v)) — not because the privacy model softened.
+  `scripts/guest-test.mjs` signs in as nobody and proves the anonymous role
+  reaches that and nothing else.
 
 - **No model writes on a member path.** See above. Five confirmed escalations
   came from relaxing this, including a pending account activating itself —
@@ -133,7 +140,9 @@ Full write-up of what was found and fixed: [docs/SECURITY-REVIEW.md](./docs/SECU
 
 ```
 app/                     screens (expo-router)
-  index.tsx              sign-in — Cognito email + password (SRP)
+  index.tsx              dispatcher — public app, or your own half if signed in
+  sign-in.tsx            Cognito email + password (SRP)
+  (public)/              NO ACCOUNT NEEDED — listen, about, the way in
   (member)/              co-host app
   (admin)/               leadership portal
 lib/
@@ -146,9 +155,12 @@ amplify/
   auth/resource.ts       Cognito
   data/resource.ts       models + authorization  ← read the design doc first
   functions/member-api/  THE PRIVACY BOUNDARY
+  functions/youtube-sync/ keeps PublicEpisode in step with the channel
 scripts/
   seed.mjs               users + demo season
-  security-test.mjs      54 adversarial API tests
+  security-test.mjs      63 adversarial API tests
+  guest-test.mjs         attacks the app as an anonymous stranger (no creds)
+  feed-test.mjs          11 checks on the YouTube parser (no AWS)
   tz-test.mjs            10 time-zone conversion tests (no AWS needed)
   reset-demo.mjs         undo demo drift (re-drafts the Calendly booking, etc.)
   ui-test.mjs            23 browser checks against the live deployment
