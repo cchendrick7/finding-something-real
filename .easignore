@@ -1,0 +1,28 @@
+# Uploaded to EAS Build; anything listed here is left out of the build context.
+
+# THE LOCKFILE IS EXCLUDED ON PURPOSE.
+#
+# EAS installs with `npm ci` when a lockfile is present, and npm cannot
+# generate a lockfile for this dependency graph that its own `npm ci` accepts.
+# Reproduced repeatedly from a clean cache: a lockfile written by `npm install`
+# is rejected seconds later by `npm ci` with "Missing: X from lock file" —
+# @opentelemetry/core, @aws-cdk/toolkit-lib, archiver. The conflict lives
+# entirely inside @aws-amplify/backend-cli's CDK tree: two versions of
+# @aws-cdk/toolkit-lib are required, npm writes only the hoisted one.
+#
+# Without the lockfile the builder runs `npm install`, which resolves fine.
+# The cost is that builds are not byte-reproducible.
+#
+# The real fix is to move the Amplify BACKEND tooling out of the app's
+# package.json — it is only used by `ampx` to deploy, and the mobile app never
+# imports it. That is a restructure, not a one-liner, and it is the thing to do
+# before this app has more than one person building it.
+package-lock.json
+
+# Not needed on the builder, and large.
+supabase/
+docs/
+store/
+scripts/
+.amplify/
+dist/

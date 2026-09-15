@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.findingsomethingreal.app",
       "buildNumber": "1",
       "infoPlist": {
@@ -56,6 +56,13 @@
     "experiments": {
       "typedRoutes": true
     },
-    "primaryColor": "#556F5A"
+    "primaryColor": "#556F5A",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d82e840c-4737-46a2-8c70-9655e99cecba"
+      }
+    },
+    "owner": "cchendrick7"
   }
 }

@@ -47,5 +47,8 @@
     "typecheck": "tsc --noEmit",
     "seed": "node --env-file=.env scripts/seed.mjs"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "@aws-cdk/toolkit-lib": "1.32.0"
+  }
 }

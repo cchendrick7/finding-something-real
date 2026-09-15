@@ -1,4 +1,5 @@
 import { Linking } from 'react-native';
+import { useRouter } from 'expo-router';
 import {
   Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule,
 } from '@/components/ui';
@@ -15,6 +16,7 @@ const open = (url: string) => { Linking.openURL(url).catch(onLoadError); };
  * if they want in. Everything longer lives on the website.
  */
 export default function About() {
+  const router = useRouter();
   return (
     <Screen>
       <Eyebrow>A 501(c)(3) ministry</Eyebrow>
@@ -71,7 +73,14 @@ export default function About() {
         ))}
       </Card>
 
-      <Small style={{ textAlign: 'center', marginTop: space.xl, color: color.faint }}>
+      <Tiny
+        onPress={() => router.push('/(public)/privacy')}
+        style={{ textAlign: 'center', marginTop: space.xl, textDecorationLine: 'underline' }}
+      >
+        Privacy
+      </Tiny>
+
+      <Small style={{ textAlign: 'center', marginTop: space.md, color: color.faint }}>
         Finding Something Real Ministry · EIN 39-4515803
       </Small>
     </Screen>
