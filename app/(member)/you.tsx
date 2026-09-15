@@ -87,7 +87,13 @@ export default function You() {
         variant="outline"
         onPress={async () => { await signOut(); router.replace('/'); }}
       />
-      <Tiny style={{ textAlign: 'center', marginTop: space.lg, textDecorationLine: 'underline' }}>
+      {/* Was underlined text with no handler — it promised something the app
+          could not do, which is a Guideline 2.1 problem on its own. */}
+      <Tiny
+        testID="open-delete-account"
+        onPress={() => router.push('/(member)/delete-account')}
+        style={{ textAlign: 'center', marginTop: space.lg, textDecorationLine: 'underline' }}
+      >
         Delete my account and data
       </Tiny>
     </Screen>

@@ -37,8 +37,12 @@ export const Body = make(type.body as TextStyle);
 export const Small = make(type.small as TextStyle);
 export const Tiny = make(type.xs as TextStyle);
 
-export const Eyebrow = ({ children, tone }: { children: React.ReactNode; tone?: string }) => (
-  <Text style={[type.eyebrow, tone ? { color: tone } : null, { marginBottom: space.sm }]}>{children}</Text>
+export const Eyebrow = ({ children, tone, style }: {
+  children: React.ReactNode; tone?: string; style?: TextStyle;
+}) => (
+  <Text style={[type.eyebrow, tone ? { color: tone } : null, { marginBottom: space.sm }, style]}>
+    {children}
+  </Text>
 );
 
 export const Rule = ({ style }: { style?: ViewStyle }) => (
@@ -88,6 +92,14 @@ export function Button({
     <Pressable
       testID={testID}
       accessibilityRole="button"
+      // `disabled` and accessibilityState, not just a dropped handler and 40%
+      // opacity. Without them the control is inert but still announced as an
+      // enabled button, still focusable, and still reports itself as enabled
+      // to anything asking — a sighted user sees "off", a screen reader user
+      // is told "on". This applies to every Button in the app; it surfaced on
+      // the one that deletes your account.
+      disabled={disabled}
+      accessibilityState={{ disabled: Boolean(disabled) }}
       onPress={disabled ? undefined : onPress}
       style={[s.btn, v[variant].box, disabled && { opacity: 0.4 }]}
     >

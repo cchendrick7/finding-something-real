@@ -56,6 +56,37 @@ And more specifically, the rule that came out of the second security review:
 
 ---
 
+## Native builds
+
+```bash
+npx expo prebuild --platform ios --no-install   # proves the config generates
+eas build --profile preview  --platform all     # installable test build
+eas build --profile production --platform all   # store binaries
+```
+
+`ios/` and `android/` are gitignored on purpose — EAS runs prebuild itself,
+and committing them switches to the bare workflow.
+
+Bundle identifier is `com.findingsomethingreal.app` on both stores.
+`eas.json`'s submit block has placeholders for the Apple ID, ASC app id and
+team id; fill them in before `eas submit`.
+
+Two native-only details that are easy to lose:
+
+- `lib/amplify.ts` imports `react-native-get-random-values` and
+  `@aws-amplify/react-native` **before** anything from `aws-amplify`. Cognito
+  signs in with SRP, which needs `crypto.getRandomValues()`; React Native has
+  no such thing, and without those imports sign-in fails on a phone with an
+  error that mentions neither crypto nor Cognito.
+- `assets/mkicon.py` regenerates the whole icon set from the brand tokens and
+  `assets/NotoSerifDisplay-600.ttf`. Change the mark there, not in an image
+  editor.
+
+`npx expo-doctor` reports one failure: duplicate `react` under
+`@aws-amplify/form-generator`. That package is only reachable through
+`@aws-amplify/backend-cli`, a devDependency used for codegen — it never enters
+a native build.
+
 ## Deploying
 
 Needs AWS credentials with permission to deploy CDK stacks.
@@ -158,7 +189,8 @@ amplify/
   functions/youtube-sync/ keeps PublicEpisode in step with the channel
 scripts/
   seed.mjs               users + demo season
-  security-test.mjs      63 adversarial API tests
+  security-test.mjs      65 adversarial API tests
+  deletion-test.mjs      14 checks that erasing an account really erases it
   guest-test.mjs         attacks the app as an anonymous stranger (no creds)
   feed-test.mjs          11 checks on the YouTube parser (no AWS)
   tz-test.mjs            10 time-zone conversion tests (no AWS needed)

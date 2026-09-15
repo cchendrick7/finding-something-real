@@ -23,6 +23,11 @@ export const auth = defineAuth({
     },
   },
   groups: ['leadership', 'cohost'],
+  // member-api needs cognito-idp:AdminDeleteUser to finish an account
+  // deletion. That grant is NOT made here: defineAuth's `access` callback
+  // makes the auth stack reference the function's stack, and since data
+  // already depends on auth that is a circular dependency CloudFormation
+  // refuses. It is attached as a one-way IAM policy in backend.ts instead.
   // Time zone (spec §5.15) lives on the Profile model, not as a Cognito
   // attribute — the app reads it from there and it needs to be queryable.
 });

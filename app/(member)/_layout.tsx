@@ -32,6 +32,7 @@ export default function MemberLayout() {
       <Tabs.Screen name="note"     options={{ href: null }} />
       <Tabs.Screen name="prayer"   options={{ href: null }} />
       <Tabs.Screen name="session/[id]" options={{ href: null }} />
+      <Tabs.Screen name="delete-account" options={{ href: null }} />
     </Tabs>
   );
 }

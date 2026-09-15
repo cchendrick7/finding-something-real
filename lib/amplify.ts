@@ -1,3 +1,17 @@
+/**
+ * Native crypto, FIRST.
+ *
+ * Cognito signs in with SRP, which needs crypto.getRandomValues(). React
+ * Native does not ship it, so on a phone the sign-in fails at the first
+ * exchange with an error that names neither crypto nor Cognito. These imports
+ * must run before anything from aws-amplify is touched, which is why they sit
+ * at the top of this file rather than in a screen.
+ *
+ * Both are no-ops on web, where the platform already provides all of it.
+ */
+import 'react-native-get-random-values';
+import '@aws-amplify/react-native';
+
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../amplify/data/resource';

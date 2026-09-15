@@ -3,6 +3,9 @@ import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 import { getAmplifyDataClientConfig } from '@aws-amplify/backend/function/runtime';
 import { env } from '$amplify/env/member-api';
+import {
+  CognitoIdentityProviderClient, AdminDeleteUserCommand,
+} from '@aws-sdk/client-cognito-identity-provider';
 
 /**
  * THE PRIVACY BOUNDARY.
@@ -336,6 +339,75 @@ export const handler = async (ctx: Ctx) => {
         profileId, body: body.slice(0, 4000), status: 'open', owner: sub,
       });
       return { ok: true };
+    }
+
+    /**
+     * Erase the caller. Required by Google Play, expected by App Review, and
+     * the right thing for an app that carries prayer requests.
+     *
+     * Note what this does NOT take: an id. The only account it can delete is
+     * the one that holds the token, so there is no way to aim it at someone
+     * else.
+     *
+     * Order matters. Rows first, Cognito user last — a crash midway leaves an
+     * account that can still sign in and see a half-empty app, which is
+     * recoverable. The reverse leaves orphaned rows belonging to a login that
+     * no longer exists, which is not.
+     */
+    case 'deleteMyAccount': {
+      const deleted: Record<string, number> = {};
+      const wipe = async (label: string, rows: { id: string }[], del: (id: string) => Promise<unknown>) => {
+        for (const r of rows) await del(r.id);
+        deleted[label] = rows.length;
+      };
+
+      // Everything keyed to this person. Recordings, Notes and Episodes are
+      // ministry content, not personal data, and stay.
+      await wipe('rsvps', await listAll(db.models.Rsvp.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.Rsvp.delete({ id }));
+      await wipe('attendance', await listAll(db.models.Attendee.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.Attendee.delete({ id }));
+      await wipe('receipts', await listAll(db.models.Receipt.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.Receipt.delete({ id }));
+      await wipe('prayerRequests', await listAll(db.models.PrayerRequest.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.PrayerRequest.delete({ id }));
+      await wipe('questions', await listAll(db.models.Question.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.Question.delete({ id }));
+      await wipe('memberships', await listAll(db.models.Membership.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.Membership.delete({ id }));
+
+      // Intake questions may be linked to a recording; drop the links first so
+      // the season planner is not left pointing at rows that no longer exist.
+      const intake = await listAll(db.models.IntakeQuestion.list, { filter: { profileId: { eq: profileId } } });
+      let links = 0;
+      for (const q of intake) {
+        const ls = await listAll(db.models.QuestionLink.list, { filter: { intakeQuestionId: { eq: q.id } } });
+        for (const l of ls) { await db.models.QuestionLink.delete({ id: l.id }); links++; }
+        await db.models.IntakeQuestion.delete({ id: q.id });
+      }
+      deleted.intakeQuestions = intake.length;
+      deleted.questionLinks = links;
+
+      await db.models.Profile.delete({ id: profileId });
+      deleted.profile = 1;
+
+      // The login goes last. Without this the person is erased and can still
+      // sign in.
+      const userPoolId = process.env.FSR_USER_POOL_ID;
+      if (!userPoolId) {
+        // Rows are already gone. Say so loudly rather than reporting success:
+        // a login that outlives its data is the one outcome worse than either.
+        console.log(JSON.stringify({ deleteMyAccount: 'ROWS DELETED BUT LOGIN REMAINS', sub, deleted }));
+        throw new Error('Account data removed, but the login could not be deleted. Contact the ministry.');
+      }
+      const cognito = new CognitoIdentityProviderClient({});
+      await cognito.send(new AdminDeleteUserCommand({
+        UserPoolId: userPoolId,
+        Username: ctx.identity?.username ?? sub,
+      }));
+
+      console.log(JSON.stringify({ deleteMyAccount: 'complete', sub, deleted }));
+      return { ok: true, deleted };
     }
 
     default:

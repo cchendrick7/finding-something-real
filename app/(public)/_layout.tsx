@@ -35,6 +35,8 @@ export default function PublicLayout() {
       <Tabs.Screen name="listen" options={{ title: 'Listen' }} />
       <Tabs.Screen name="about" options={{ title: 'About' }} />
       <Tabs.Screen name="cohost" options={{ title: 'Co-hosts' }} />
+      {/* The web deletion URL Google Play requires. Reachable, not a tab. */}
+      <Tabs.Screen name="delete-request" options={{ href: null }} />
     </Tabs>
   );
 }

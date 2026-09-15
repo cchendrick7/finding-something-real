@@ -625,6 +625,20 @@ export async function coverageGaps(): Promise<Profile[]> {
   return [...waiting, ...neverAsked];
 }
 
+/**
+ * Erase the signed-in account: every row keyed to this person, then the login.
+ *
+ * Takes no id on purpose — the Lambda deletes whoever holds the token and
+ * nobody else. Ministry content (recordings, notes, episodes) is not personal
+ * data and stays.
+ */
+export async function deleteMyAccount(): Promise<{ ok: boolean }> {
+  if (DEMO_MODE) return { ok: true };
+  const r = await client.mutations.deleteMyAccount();
+  if (r.errors?.length) throw new Error(r.errors[0].message);
+  return { ok: true };
+}
+
 /* ----------------------------------------------------------------- prayers */
 
 export async function submitPrayer(me: string, body: string) {

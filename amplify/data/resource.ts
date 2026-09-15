@@ -19,6 +19,16 @@ export const memberApi = defineFunction({
   name: 'member-api',
   entry: './../functions/member-api/handler.ts',
   timeoutSeconds: 20,
+  /**
+   * Pinned to the data stack, deliberately.
+   *
+   * This function resolves AppSync fields (data depends on it) and, since
+   * account deletion, also deletes Cognito users (it depends on auth) — while
+   * data already depends on auth. In its own stack that is a three-way cycle
+   * and CloudFormation refuses the whole deployment. Living inside the data
+   * stack, which already depends on auth, removes the loop.
+   */
+  resourceGroupName: 'data',
 });
 
 /**
@@ -472,6 +482,25 @@ const schema = a
     submitPrayerRequest: a
       .mutation()
       .arguments({ body: a.string().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(memberApi)),
+
+    /**
+     * Erase yourself.
+     *
+     * Required by Google Play for any app with accounts, and expected by App
+     * Review; the app already had a "Delete my account and data" link that did
+     * nothing, which is its own Guideline 2.1 problem.
+     *
+     * Deliberately a Lambda and not a model delete. A co-host's data is spread
+     * across nine tables plus Cognito, most of which she cannot touch
+     * directly — and must not be able to, since a client that could delete
+     * Rsvp rows could delete someone else's. The caller supplies no id: the
+     * only account this can delete is the one holding the token.
+     */
+    deleteMyAccount: a
+      .mutation()
       .returns(a.json())
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(memberApi)),

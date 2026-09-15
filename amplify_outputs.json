@@ -2444,6 +2444,12 @@
               "isRequired": true
             }
           }
+        },
+        "deleteMyAccount": {
+          "name": "deleteMyAccount",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false
         }
       }
     }
