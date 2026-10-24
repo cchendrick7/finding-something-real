@@ -13,3 +13,7 @@ play-service-account.json
 *.mobileprovision
 ios/
 android/
+
+# test-backend web build and the safety copy build-test-web.mjs makes
+dist-test/
+.amplify_outputs.production.bak
