@@ -30,6 +30,40 @@ const decode = (s: string) =>
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&');
 
+/** Roughly a screenful on a phone. Enough to say what the episode is about. */
+const BLURB_MAX = 500;
+
+/**
+ * The description, made fit to read on a card.
+ *
+ * YouTube descriptions are written for the YouTube page: several hundred words,
+ * a wall of blank lines, then links and hashtags. The opening paragraph is the
+ * part worth keeping, so this keeps that — but it used to keep exactly the
+ * first 500 characters, which on the episode screen ended a sentence with "In
+ * this episode, we g". A cut in the middle of a word reads as a broken app,
+ * not as an abbreviation, so this cuts on the last space and says it was cut.
+ *
+ * The blank-line collapsing is the other half: three paragraph breaks in a row
+ * put half a screen of nothing between two sentences.
+ */
+function blurbFrom(description: string | null): string | null {
+  if (!description) return null;
+  const text = decode(description)
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!text) return null;
+  if (text.length <= BLURB_MAX) return text;
+
+  const cut = text.slice(0, BLURB_MAX);
+  const brk = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf('\n'));
+  // A description with no whitespace in its first 500 characters is not a
+  // sentence; cut it at the limit rather than throwing the whole thing away.
+  const end = brk > BLURB_MAX * 0.6 ? brk : BLURB_MAX;
+  return `${cut.slice(0, end).replace(/[\s.,;:—-]+$/, '')}…`;
+}
+
 /**
  * Fields are read WITHIN each <entry> block, never by collecting all titles
  * and all dates and zipping them — the elements do not appear in a matching
@@ -57,7 +91,7 @@ export function parseFeed(xml: string): FeedEntry[] {
         ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
       publishedAt: published,
       kind: /#shorts\b/i.test(title) ? 'short' : 'episode',
-      blurb: description ? decode(description).trim().slice(0, 500) || null : null,
+      blurb: blurbFrom(description),
     });
   }
   return out;

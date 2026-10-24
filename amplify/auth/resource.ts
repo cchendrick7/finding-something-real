@@ -20,6 +20,25 @@ export const auth = defineAuth({
       verificationEmailSubject: 'Your Finding Something Real code',
       verificationEmailBody: (code: () => string) =>
         `Welcome. Your code is ${code()} — enter it in the app to finish setting up.`,
+      /**
+       * The email Cognito sends when an account is made for someone — by
+       * provisionCohost in the app, or by scripts/make-leader.mjs. It carries the
+       * temporary password, so the password never passes through leadership's
+       * screen unless she chooses to read it out.
+       *
+       * NOTE: scripts/invite-template.mjs applies a role-neutral version of this
+       * text directly to the pool (leaders get it too). A deploy puts THIS text
+       * back, so re-run that script after deploying auth changes.
+       */
+      userInvitation: {
+        emailSubject: 'Your Finding Something Real co-host account',
+        emailBody: (username: () => string, code: () => string) =>
+          `<p>Someone from the Finding Something Real team has set up a co-host account for you.</p>`
+          + `<p>Open the app, choose <strong>Co-hosts</strong>, and sign in with:</p>`
+          + `<p>Email: <strong>${username()}</strong><br />Temporary password: <strong>${code()}</strong></p>`
+          + `<p>You will be asked to choose your own password straight away.</p>`
+          + `<p>If you were not expecting this you can ignore it — the account does nothing until someone signs in, and it can be removed.</p>`,
+      },
     },
   },
   groups: ['leadership', 'cohost'],

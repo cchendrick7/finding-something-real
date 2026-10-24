@@ -148,6 +148,10 @@ async function toSessionView(
     guestReturning: Boolean(guestReturning),
     attendeeCount: attendees.length,
     yourQuestion,
+    // A cancelled session stays visible, marked. See admin-api's
+    // withdrawRecording: erasing one is what made it vanish with no
+    // explanation.
+    cancelledAt: rec.cancelledAt ?? null,
   };
 }
 
@@ -332,6 +336,23 @@ export const handler = async (ctx: Ctx) => {
       return { ok: true };
     }
 
+    /**
+     * "Reach out to one of us." One way, to leadership, no thread.
+     *
+     * Same shape as submitPrayerRequest deliberately — profileId from the
+     * verified caller, body trimmed, capped, and refused when empty. A
+     * different table because a prayer request and "can we move Thursday" are
+     * not the same kind of thing to receive.
+     */
+    case 'sendMessage': {
+      const body = String(argsOf(ctx).body ?? '').trim();
+      if (!body) throw new Error('Empty message');
+      await db.models.Message.create({
+        profileId, body: body.slice(0, 4000), status: 'open', owner: sub,
+      });
+      return { ok: true };
+    }
+
     case 'submitPrayerRequest': {
       const body = String(argsOf(ctx).body ?? '').trim();
       if (!body) throw new Error('Empty request');
@@ -375,6 +396,16 @@ export const handler = async (ctx: Ctx) => {
         (id) => db.models.Question.delete({ id }));
       await wipe('memberships', await listAll(db.models.Membership.list, { filter: { profileId: { eq: profileId } } }),
         (id) => db.models.Membership.delete({ id }));
+
+      // Her devices, and the record of what was ever sent to them. Both are
+      // personal data — a push token identifies a phone, and the notification
+      // log says when she was told about what. Leaving the tokens behind would
+      // also mean her phone kept buzzing about sessions for an account that no
+      // longer exists.
+      await wipe('pushTokens', await listAll(db.models.PushToken.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.PushToken.delete({ id }));
+      await wipe('notificationLog', await listAll(db.models.NotificationLog.list, { filter: { profileId: { eq: profileId } } }),
+        (id) => db.models.NotificationLog.delete({ id }));
 
       // Intake questions may be linked to a recording; drop the links first so
       // the season planner is not left pointing at rows that no longer exist.

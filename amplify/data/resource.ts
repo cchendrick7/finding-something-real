@@ -45,6 +45,60 @@ export const youtubeSync = defineFunction({
   schedule: 'every 2h',
 });
 
+/**
+ * Provisioning: issue co-host accounts, reset a password, turn an account off
+ * and on, and withdraw a session. It holds the Cognito powers member-api is
+ * deliberately denied — read the invariants at the top of its handler before
+ * touching it. The group it adds people to is a constant there, not an
+ * argument, so no input to this function can produce a leader.
+ *
+ * Data stack for the same reason as member-api: it resolves AppSync fields and
+ * calls Cognito.
+ */
+export const adminApi = defineFunction({
+  name: 'admin-api',
+  entry: './../functions/admin-api/handler.ts',
+  timeoutSeconds: 30,
+  resourceGroupName: 'data',
+});
+
+/**
+ * Device registration and notification preferences. Callable by a listener
+ * with no account (guest) as well as by a co-host — a listener can only ever
+ * ask for new-episode announcements, and her token is stored against no
+ * profile.
+ */
+export const pushApi = defineFunction({
+  name: 'push-api',
+  entry: './../functions/push-api/handler.ts',
+  timeoutSeconds: 20,
+  resourceGroupName: 'data',
+});
+
+/**
+ * The one write an anonymous stranger can make: the interest form. Validated
+ * by lib/interest.ts, the same rules the screen uses.
+ */
+export const publicApi = defineFunction({
+  name: 'public-api',
+  entry: './../functions/public-api/handler.ts',
+  timeoutSeconds: 20,
+  resourceGroupName: 'data',
+});
+
+/**
+ * Sends what is due — invitations, reminders, notes, new episodes, a session
+ * moved or called off — and records each send in NotificationLog so nothing is
+ * announced twice. A reconciler on a schedule rather than a trigger on each
+ * write: a missed run is caught up by the next one.
+ */
+export const pushOutbox = defineFunction({
+  name: 'push-outbox',
+  entry: './../functions/push-outbox/handler.ts',
+  timeoutSeconds: 120,
+  schedule: 'every 5m',
+});
+
 /** Shapes returned to co-hosts. Deliberately narrower than the models. */
 const PublicProfile = a.customType({
   id: a.string(),
@@ -67,6 +121,8 @@ const SessionView = a.customType({
   attendeeCount: a.integer(),
   /** Set only when an intake question of the CALLER's is linked to this session. */
   yourQuestion: a.string(),
+  /** Set when leadership called the session off. It stays visible, marked, so nobody is left wondering. */
+  cancelledAt: a.datetime(),
 });
 
 const NoteView = a.customType({
@@ -176,6 +232,13 @@ const schema = a
         publishedAt: a.datetime(),
         announceAt: a.datetime(),
         announcedAt: a.datetime(),
+        // The scheduledAt the last invitation went out for. When the session
+        // moves, the outbox sees the two differ and tells everyone invited —
+        // once per move, not once per run.
+        announcedFor: a.datetime(),
+        // Calling off a PUBLISHED session marks it rather than deleting it:
+        // RSVPs and questions are kept and everyone invited is told.
+        cancelledAt: a.datetime(),
         source: a.enum(['manual', 'calendly']),
         calendlyEventId: a.string(),
       })
@@ -304,6 +367,22 @@ const schema = a
         allow.group('leadership'),
       ]),
 
+    /**
+     * "Reach out to us." Beside PrayerRequest rather than a `kind` on it: a
+     * prayer request is pastorally a different thing from "can we move
+     * Thursday", and folding one into the other makes both harder to treat
+     * properly. Same rule: leadership only, in both directions. Written by
+     * sendMessage on member-api, which sets profileId from the caller.
+     */
+    Message: a
+      .model({
+        owner: a.string(),
+        profileId: a.string().required(),
+        body: a.string().required(),
+        status: a.string().default('open'),
+      })
+      .authorization((allow) => [allow.group('leadership')]),
+
     /* --------------------------------------------------------- messaging */
 
     Note: a
@@ -336,14 +415,44 @@ const schema = a
         allow.group('leadership'),
       ]),
 
+    /**
+     * One phone. A listener's row has no profileId; signing in attaches it to
+     * her profile (push-api turns the co-host categories on only at that
+     * promotion, never afterwards, so a choice she made is kept). Leadership
+     * only — every write goes through push-api.
+     */
+    PushToken: a
+      .model({
+        token: a.string().required(),
+        profileId: a.string(),
+        platform: a.string(),
+        deviceLabel: a.string(),
+        wantsSessions: a.boolean().default(true),
+        wantsReminders: a.boolean().default(true),
+        wantsNotes: a.boolean().default(true),
+        wantsEpisodes: a.boolean().default(true),
+        lastSeenAt: a.datetime(),
+        // Set when Expo reports the token dead (DeviceNotRegistered). Kept, not
+        // deleted, so a stale token re-registering is recognisable.
+        retiredAt: a.datetime(),
+      })
+      .authorization((allow) => [allow.group('leadership')]),
+
+    /**
+     * Every send, and every suppression. dedupeKey is what stops the outbox
+     * announcing the same thing twice — which is why withdrawing a session
+     * keeps these rows. profileId is empty for a broadcast to listeners.
+     */
     NotificationLog: a
       .model({
-        profileId: a.string().required(),
+        profileId: a.string(),
         kind: a.string().required(),
         class: a.enum(['broadcast', 'time_sensitive', 'internal']),
         targetType: a.string(),
         targetId: a.string(),
+        dedupeKey: a.string(),
         sentAt: a.datetime(),
+        deviceCount: a.integer(),
         suppressedReason: a.string(),
       })
       .authorization((allow) => [allow.group('leadership')]),
@@ -355,6 +464,25 @@ const schema = a
         artworkUrl: a.string(),
         number: a.integer(),
         publishedAt: a.datetime(),
+      })
+      .authorization((allow) => [allow.group('leadership')]),
+
+    /**
+     * Interest-form submissions. Leadership only; the only writer is
+     * submitInterest on public-api. The row id is derived from the email
+     * (lib/interest.ts idForEmail), so a repeat submission overwrites rather
+     * than adds — and the form cannot be used to ask whether a given woman has
+     * already been in touch.
+     */
+    Inquiry: a
+      .model({
+        name: a.string().required(),
+        email: a.string().required(),
+        phone: a.string(),
+        note: a.string(),
+        source: a.enum(['app', 'website']),
+        handled: a.boolean(),
+        handledAt: a.datetime(),
       })
       .authorization((allow) => [allow.group('leadership')]),
 
@@ -478,6 +606,14 @@ const schema = a
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(memberApi)),
 
+    /** "Reach out to us." One way, to leadership only; profileId from the caller. */
+    sendMessage: a
+      .mutation()
+      .arguments({ body: a.string().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(memberApi)),
+
     /** Goes only to leadership. profileId comes from the caller, never the client. */
     submitPrayerRequest: a
       .mutation()
@@ -504,8 +640,115 @@ const schema = a
       .returns(a.json())
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(memberApi)),
+
+    /* ---------------------------------------------------- notifications */
+
+    /** A co-host's phone. Attaches the device to the caller's own profile. */
+    registerPushToken: a
+      .mutation()
+      .arguments({ token: a.string().required(), platform: a.string(), deviceLabel: a.string() })
+      .returns(a.json())
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(pushApi)),
+
+    /** A listener's phone — no account. New-episode announcements only. */
+    registerListenerPushToken: a
+      .mutation()
+      .arguments({ token: a.string().required(), platform: a.string() })
+      .returns(a.json())
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(pushApi)),
+
+    setPushPrefs: a
+      .mutation()
+      .arguments({
+        token: a.string().required(),
+        wantsSessions: a.boolean(),
+        wantsReminders: a.boolean(),
+        wantsNotes: a.boolean(),
+        wantsEpisodes: a.boolean(),
+      })
+      .returns(a.json())
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(pushApi)),
+
+    unregisterPushToken: a
+      .mutation()
+      .arguments({ token: a.string().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(pushApi)),
+
+    myPushPrefs: a
+      .query()
+      .arguments({ token: a.string().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(pushApi)),
+
+    /* -------------------------------------------------- the interest form */
+
+    /**
+     * The widest door in the backend: anyone, no account. It can write one
+     * Inquiry row and nothing else, and it cannot read anything back.
+     */
+    submitInterest: a
+      .mutation()
+      .arguments({
+        name: a.string().required(),
+        email: a.string().required(),
+        phone: a.string(),
+        note: a.string(),
+      })
+      .returns(a.json())
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(publicApi)),
+
+    /* ------------------------------------------------- leadership actions */
+    /* No role, group or status argument anywhere below — see admin-api. */
+
+    provisionCohost: a
+      .mutation()
+      .arguments({ email: a.string().required(), displayName: a.string().required(), timezone: a.string() })
+      .returns(a.json())
+      .authorization((allow) => [allow.group('leadership')])
+      .handler(a.handler.function(adminApi)),
+
+    resetCohostPassword: a
+      .mutation()
+      .arguments({ profileId: a.string().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.group('leadership')])
+      .handler(a.handler.function(adminApi)),
+
+    /**
+     * A draft is deleted; a published session is called off (marked, kept,
+     * everyone told); one already called off is deleted for good.
+     */
+    withdrawRecording: a
+      .mutation()
+      .arguments({ recordingId: a.string().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.group('leadership')])
+      .handler(a.handler.function(adminApi)),
+
+    setCohostActive: a
+      .mutation()
+      .arguments({ profileId: a.string().required(), active: a.boolean().required() })
+      .returns(a.json())
+      .authorization((allow) => [allow.group('leadership')])
+      .handler(a.handler.function(adminApi)),
   })
-  .authorization((allow) => [allow.resource(memberApi), allow.resource(youtubeSync)]);
+  // Schema-level, deliberately: model-level allow.resource() does not compile in
+  // this version of @aws-amplify/backend.
+  .authorization((allow) => [
+    allow.resource(memberApi),
+    allow.resource(youtubeSync),
+    allow.resource(adminApi),
+    allow.resource(pushApi),
+    allow.resource(publicApi),
+    allow.resource(pushOutbox),
+  ]);
 
 export type Schema = ClientSchema<typeof schema>;
 

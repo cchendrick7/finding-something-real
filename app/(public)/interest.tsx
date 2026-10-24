@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { submitInterest } from '@/lib/data';
-import { problems, type InterestInput } from '@/lib/interest';
+import { problems, type Interest } from '@/lib/interest';
 import {
   Screen, Display, Body, Small, Tiny, Rule, Button, Field, Eyebrow, Card,
 } from '@/components/ui';
@@ -30,7 +30,7 @@ export default function InterestForm() {
   const [failed, setFailed] = useState(false);
   const [sent, setSent] = useState(false);
 
-  const errs = problems(form as InterestInput);
+  const errs = problems(form as Interest);
   const set = (key: keyof Form) => (v: string) => setForm((f) => ({ ...f, [key]: v }));
   const errorFor = (key: keyof Form) => (tried ? errs[key] : undefined);
 

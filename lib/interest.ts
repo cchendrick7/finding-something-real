@@ -1,59 +1,100 @@
 /**
- * The public interest form's rules: what is tidied, what is refused, and how
- * long anything may be. No React, so the same rules can be checked outside
- * the app.
+ * "WE'D GENUINELY LOVE TO HEAR FROM YOU" — the rules behind the form.
+ *
+ * Janell asked for a way for an interested woman to leave her details at the
+ * end of ABOUT, and at the co-host sign-in. This module holds what counts as
+ * a valid submission, and it is imported by BOTH the screen and the Lambda
+ * that receives it.
+ *
+ * That is the whole point of the file. A form that validates on the client
+ * and a handler that validates differently is two rules, and the one that
+ * matters is the one nobody reads. Here there is one rule, the screen uses it
+ * to decide whether the button is live, the handler uses it to decide whether
+ * to write a row, and scripts/interest-test.mjs runs it directly.
+ *
+ * WHAT IS DELIBERATELY NOT HERE
+ *
+ * No date of birth, and no age question. The audience is women in their late
+ * teens and twenties, so some submitters are 16 or 17. COPPA stops at 13, so
+ * they are outside it — but asking for a birthdate is exactly what would give
+ * the ministry actual knowledge of an under-13 submitter and pull it inside.
+ * Not asking is the safer answer as well as the kinder one.
+ *
+ * Phone is OPTIONAL. Guideline 5.1.1(iii) is data minimisation, and of the
+ * three fields the phone number is the one a reviewer could argue with. It is
+ * also the one a sixteen-year-old is most likely to hesitate over.
  */
 
-export type InterestInput = {
-  name?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  note?: string | null;
-};
-
-export type Interest = {
+/** What the form collects. `phone` may be omitted entirely. */
+export interface Interest {
   name: string;
   email: string;
   phone?: string;
   note?: string;
-};
+}
 
-export type Problems = Partial<Record<keyof Interest, string>>;
+/**
+ * Length caps. These are not UI niceties — they are the only thing standing
+ * between an unauthenticated mutation and someone storing a novel in the
+ * ministry's DynamoDB table one call at a time.
+ */
+export const LIMITS = { name: 80, email: 254, phone: 32, note: 1000 } as const;
 
-/** Longest value we store for each field. */
-export const LIMITS = { name: 80, email: 254, phone: 32, note: 1000 };
+/**
+ * Email, pragmatically.
+ *
+ * Not RFC 5322. Nothing here needs to accept a quoted local part with a
+ * comment in it, and every regex that tries is either wrong or unreadable.
+ * This rejects the mistakes people actually make on a phone — no @, no dot in
+ * the domain, a trailing comma, a space in the middle.
+ */
+const EMAIL_RE = /^[^\s@,;]+@[^\s@,;]+\.[A-Za-z]{2,}$/;
 
-const EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[A-Za-z]{2,}$/;
-const DIGIT = /\d/g;
+/**
+ * Phone, permissively.
+ *
+ * International, extensions, dashes, dots, brackets and the word "ext" all
+ * arrive in real submissions. A human reads this field, not a dialler, so the
+ * check is only "could this plausibly be a phone number": enough digits, and
+ * nothing that looks like prose.
+ */
+const PHONE_DIGITS = /\d/g;
 
-/** Collapse runs of whitespace and trim; an empty optional field becomes undefined. */
-export function tidy(input: InterestInput): Interest {
-  const clean = (s?: string | null) => {
-    const t = (s ?? '').replace(/\s+/g, ' ').trim();
+export type Field = keyof Interest;
+
+/** Trimmed, collapsed whitespace, and empty strings turned into undefined. */
+export function tidy(raw: Interest): Interest {
+  const s = (v?: string) => {
+    const t = (v ?? '').replace(/\s+/g, ' ').trim();
     return t.length ? t : undefined;
   };
   return {
-    name: clean(input.name) ?? '',
-    email: (clean(input.email) ?? '').toLowerCase(),
-    phone: clean(input.phone),
-    note: clean(input.note),
+    name: s(raw.name) ?? '',
+    email: (s(raw.email) ?? '').toLowerCase(),
+    phone: s(raw.phone),
+    note: s(raw.note),
   };
 }
 
-/** One message per field that is wrong, in the form's voice. Empty = fine to send. */
-export function problems(input: InterestInput): Problems {
-  const v = tidy(input);
-  const out: Problems = {};
+/**
+ * What is wrong with this submission, keyed by field. Empty object = valid.
+ *
+ * Messages are written for the woman filling the form in, not for a log. She
+ * is the only one who will ever read them.
+ */
+export function problems(raw: Interest): Partial<Record<Field, string>> {
+  const v = tidy(raw);
+  const out: Partial<Record<Field, string>> = {};
+
   if (!v.name) out.name = 'We need something to call you.';
   else if (v.name.length > LIMITS.name) out.name = 'That is longer than we can store — a first name is plenty.';
 
   if (!v.email) out.email = 'We need an email address to reply to.';
   else if (v.email.length > LIMITS.email) out.email = 'That address is too long to be real.';
-  else if (!EMAIL.test(v.email)) out.email = 'That does not look like an email address.';
+  else if (!EMAIL_RE.test(v.email)) out.email = 'That does not look like an email address.';
 
-  // Phone is optional; if it is there it should at least be a phone number.
   if (v.phone) {
-    const digits = (v.phone.match(DIGIT) ?? []).length;
+    const digits = (v.phone.match(PHONE_DIGITS) ?? []).length;
     if (v.phone.length > LIMITS.phone) out.phone = 'That is longer than a phone number.';
     else if (digits < 7) out.phone = 'That does not look like a phone number. You can leave it blank.';
   }
@@ -64,15 +105,28 @@ export function problems(input: InterestInput): Problems {
   return out;
 }
 
-export const isValid = (input: InterestInput) => Object.keys(problems(input)).length === 0;
+export const isValid = (raw: Interest) => Object.keys(problems(raw)).length === 0;
 
 /**
- * The Inquiry id is derived from the email, so a repeat submission is
- * byte-identical to a first — and the form cannot be used to ask whether a
- * woman has been in touch. The hash function is passed in rather than
- * imported; trimming and lower-casing first means "Anna@x.com " and
- * "anna@x.com" give the same id.
+ * The row id: the email, lowercased and hashed.
+ *
+ * Same trick as PushToken, for the same reason. This mutation is callable by
+ * someone with no account, so the question "how many rows can a caller
+ * create?" has to have a bounded answer. With the id derived from the email,
+ * a thousand calls from one address make one row — a second submission
+ * updates the first rather than filling the table.
+ *
+ * It does NOT stop a thousand made-up addresses. Nothing in the schema can;
+ * that is a rate limit, and a rate limit on AppSync means AWS WAF in front of
+ * the endpoint. Named as a gap in docs/APP-STORE-DECISIONS.md rather than
+ * pretended away here.
+ *
+ * Hashing rather than storing the email as the key also means the id itself
+ * is not a personal identifier, so it can appear in a log line safely.
  */
-export async function idForEmail(email: string, hash: (s: string) => Promise<string>): Promise<string> {
-  return hash(email.trim().toLowerCase());
+export async function idForEmail(
+  email: string,
+  digest: (s: string) => Promise<string> | string,
+): Promise<string> {
+  return digest(email.trim().toLowerCase());
 }
