@@ -1,8 +1,7 @@
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { listRecordings, rsvpRoster, readStats, listAllNotes, coverageStatus, listGuests } from '@/lib/data';
+import { listRecordings, rsvpRoster, readStats, listAllNotes, coverageStatus, listGuests, listMessages, listInquiries } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr } from '@/lib/tz';
 import { Screen, Display, H2, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button } from '@/components/ui';
 import { space, color, type } from '@/lib/theme';
@@ -28,6 +27,8 @@ export default function Overview() {
   const [yes, setYes] = useState(0);
   const [silent, setSilent] = useState(0);
   const [cover, setCover] = useState<{ waiting: Profile[]; neverAsked: Profile[] }>({ waiting: [], neverAsked: [] });
+  const [messages, setMessages] = useState(0);
+  const [inquiries, setInquiries] = useState(0);
 
   useFocusEffect(useCallback(() => {
     (async () => {
@@ -43,6 +44,9 @@ export default function Overview() {
         setSilent(roster.filter((x) => !x.response).length);
       }
       setCover(await coverageStatus());
+      setMessages((await listMessages()).length);
+      // Only the ones nobody has answered yet; "Mark answered" takes them off.
+      setInquiries((await listInquiries()).filter((i) => !i.handled).length);
     })().catch(onLoadError);
   }, []));
 
@@ -106,6 +110,36 @@ export default function Overview() {
           </Body>
         </Card>
       ) : null}
+
+      {/* Reach out is one way on purpose: she was told the answer comes by
+          text or in person, so a message sitting here is someone waiting. */}
+      {messages > 0 ? (
+        <Card tone="gold" testID="overview-messages" onPress={() => router.push('/(admin)/messages')}>
+          <Eyebrow tone="#8A6D28">Waiting for you</Eyebrow>
+          <H3 style={{ marginBottom: 4 }}>
+            {messages === 1 ? 'A co-host reached out' : `${messages} co-hosts reached out`}
+          </H3>
+          <Small>She has been told the answer comes by text or in person →</Small>
+        </Card>
+      ) : null}
+
+      {/* The interest form takes no account, so there is no other way back to
+          her: if leadership does not reply, nobody does. */}
+      {inquiries > 0 ? (
+        <Card tone="gold" testID="overview-inquiries" onPress={() => router.push('/(admin)/inquiries')}>
+          <Eyebrow tone="#8A6D28">Waiting for you</Eyebrow>
+          <H3 style={{ marginBottom: 4 }}>
+            {inquiries === 1 ? 'Someone asked about a future cohort' : `${inquiries} asked about a future cohort`}
+          </H3>
+          <Small>No account, no way to chase it up — she is waiting on you →</Small>
+        </Card>
+      ) : null}
+
+      <Card tone="sage" testID="overview-people" onPress={() => router.push('/(admin)/people')}>
+        <Eyebrow>The cohort</Eyebrow>
+        <H3 style={{ marginBottom: 4 }}>Add or remove a co-host</H3>
+        <Small>Issue an account, reset a password, turn one off at the end of a season →</Small>
+      </Card>
 
       {scheduled.length ? (
         <Card tone="wash">

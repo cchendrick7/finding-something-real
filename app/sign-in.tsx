@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { View, Keyboard } from 'react-native';
 import { useRouter } from 'expo-router';
-import { signIn, confirmSignIn } from 'aws-amplify/auth';
+import { signIn, signOut, confirmSignIn } from 'aws-amplify/auth';
 import { useSession } from '@/lib/session';
 import { DEMO_MODE } from '@/lib/amplify';
+import { signInFresh, friendlyAuthError, NEW_PASSWORD_STEP } from '@/lib/auth';
 import {
   Screen, Display, Body, Small, Tiny, Rule, Button, Field, Eyebrow, Card,
 } from '@/components/ui';
 import { color, space } from '@/lib/theme';
+import { onLoadError } from '@/lib/loadError';
 
 /**
  * Sign-in.
@@ -21,6 +23,10 @@ import { color, space } from '@/lib/theme';
  * Cognito can answer a sign-in with a challenge instead of a session. The one
  * that actually happens here is a forced password change on a first login, so
  * that path is handled rather than swallowed.
+ *
+ * The keyboard is dismissed on every submit and any error is shown in a card
+ * ABOVE the button: it used to sit under the button, which on a phone put it
+ * under the keyboard, where nobody could see it.
  */
 export default function SignIn() {
   const { profile, loading, noProfile, signInDemo, signOut: endSession } = useSession();
@@ -37,40 +43,52 @@ export default function SignIn() {
   }, [profile, router]);
 
   async function doSignIn() {
+    Keyboard.dismiss();
     setErr(null); setBusy(true);
     try {
       // SRP, which is the only password flow the Amplify-generated app client
       // enables (ALLOW_USER_SRP_AUTH). USER_PASSWORD_AUTH is deliberately off:
       // it sends the password to Cognito in the clear inside TLS. Do not add it
       // just to make a test easier.
-      const { nextStep } = await signIn({
-        username: email.trim().toLowerCase(),
-        password,
+      //
+      // signInFresh, not signIn: a stale session left on the phone made Amplify
+      // answer "There is already a signed in user" to a correct password.
+      const { nextStep } = await signInFresh(email, password, {
+        signIn,
+        signOut: () => signOut(),
       });
-      if (nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+      if (nextStep.signInStep === NEW_PASSWORD_STEP) {
         setStage('newPassword');
       } else if (nextStep.signInStep !== 'DONE') {
-        setErr(`This account needs another step to sign in (${nextStep.signInStep}). Ask an administrator.`);
+        setErr(`This account needs another step to sign in (${nextStep.signInStep}). Ask Janell.`);
       }
       // On DONE the Hub 'signedIn' event loads the profile and the effect above
       // redirects. Nothing to do here.
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not sign in.');
+      setErr(friendlyAuthError(e));
     } finally {
       setBusy(false);
     }
   }
 
   async function doNewPassword() {
+    Keyboard.dismiss();
     setErr(null); setBusy(true);
     try {
       await confirmSignIn({ challengeResponse: newPassword });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not set that password.');
+      setErr(friendlyAuthError(e));
     } finally {
       setBusy(false);
     }
   }
+
+  // Above the button, never below it — below is under the keyboard.
+  const errorCard = err ? (
+    <Card tone="blush" testID="signin-error-card" style={{ marginBottom: space.md }}>
+      <Tiny testID="signin-error" style={{ color: color.danger }}>{err}</Tiny>
+    </Card>
+  ) : null;
 
   if (loading) return <Screen><Body>Loading…</Body></Screen>;
 
@@ -93,7 +111,7 @@ export default function SignIn() {
             testID="signout"
             label="Sign out"
             variant="outline"
-            onPress={endSession}
+            onPress={() => { endSession().catch(onLoadError); }}
           />
         </View>
       </Screen>
@@ -110,10 +128,14 @@ export default function SignIn() {
         >
           ← Back to the podcast
         </Tiny>
-        <Eyebrow>Finding Something Real</Eyebrow>
+        <Eyebrow>Co-host sign-in</Eyebrow>
         <Display style={{ fontSize: 38, lineHeight: 42 }}>
-          Finding{'\n'}Something{'\n'}Real
+          Finding{'\n'}Something{'\n'}REAL
         </Display>
+        <Small style={{ marginTop: space.md }}>
+          Already part of an FSR cohort? Sign in with the email address where you
+          received your invitation.
+        </Small>
         <Rule />
 
         {DEMO_MODE ? (
@@ -155,13 +177,13 @@ export default function SignIn() {
               secure
               autoCapitalize="none"
             />
+            {errorCard}
             <Button
               testID="password-signin"
               label={busy ? 'Signing in…' : 'Sign in'}
               onPress={doSignIn}
               disabled={busy || !email.includes('@') || !password}
             />
-            {err ? <Tiny testID="signin-error" style={{ color: color.danger, marginTop: 12 }}>{err}</Tiny> : null}
           </>
         ) : (
           <>
@@ -177,18 +199,29 @@ export default function SignIn() {
               autoCapitalize="none"
               hint="At least 8 characters."
             />
+            {errorCard}
             <Button
               testID="new-password-submit"
               label={busy ? 'Saving…' : 'Save and continue'}
               onPress={doNewPassword}
               disabled={busy || newPassword.length < 8}
             />
-            {err ? <Tiny testID="signin-error" style={{ color: color.danger, marginTop: 12 }}>{err}</Tiny> : null}
           </>
         )}
 
-        <Tiny style={{ textAlign: 'center', marginTop: space.xl }}>
-          Invitation only. If you were not invited you will not be able to create an account.
+        <Rule style={{ marginVertical: space.xl }} />
+        <Eyebrow>Interested in becoming a co-host?</Eyebrow>
+        <Small>
+          We'd love to hear from you. FSR cohorts are small and invited one season at a
+          time, but if a future season sounds like something you'd want to be part of,
+          tell us — we'd genuinely like to talk with you.
+        </Small>
+        <Tiny
+          testID="cohost-interest"
+          onPress={() => router.push('/(public)/interest')}
+          style={{ marginTop: 10, textDecorationLine: 'underline', color: color.ink }}
+        >
+          Get in touch →
         </Tiny>
       </View>
     </Screen>

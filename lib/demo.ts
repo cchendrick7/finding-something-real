@@ -1,14 +1,15 @@
 /**
  * Demo fixtures.
  *
- * With no Supabase project configured the app runs entirely on these, so the
- * build is clickable before anything is provisioned. The demo layer deliberately
- * reproduces the RLS rules (peers see only 'yes' RSVPs, prayer requests are
- * leadership-only) so what reviewers see matches what the database enforces.
+ * With no amplify_outputs.json the app runs entirely on these, so the build is
+ * clickable before anything is provisioned. The demo layer deliberately
+ * reproduces the access rules (peers see only 'yes' RSVPs, prayer requests and
+ * messages are leadership-only) so what reviewers see matches what the backend
+ * enforces.
  */
 import type {
   Profile, Season, Guest, Recording, Rsvp, FsrEvent, Question, IntakeQuestion,
-  QuestionLink, PrayerRequest, Note, Receipt, Episode, Membership, PublicEpisode,
+  QuestionLink, PrayerRequest, Message, Note, Receipt, Episode, Membership, PublicEpisode,
 } from './types';
 
 const S1 = 'season-fall-2026';
@@ -123,6 +124,13 @@ export const prayerRequests: PrayerRequest[] = [
     body: "My mom's surgery is Thursday. I am more scared than I have told anyone." },
   { id: 'pr2', profile_id: 'p-imani', status: 'open', submitted_at: '2026-09-08T03:20:00Z',
     body: 'Honestly just that I would keep showing up. I almost did not come to the retreat.' },
+];
+
+// "Reach out": a message to leadership, kept apart from prayer requests because
+// it is pastorally different. Leadership only, same as prayer requests.
+export const messages: Message[] = [
+  { id: 'm1', profile_id: 'p-imani', status: 'open', submitted_at: '2026-09-11T19:40:00Z',
+    body: 'Could we start ten minutes later on Thursdays? My shift does not end till six.' },
 ];
 
 export const notes: Note[] = [

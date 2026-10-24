@@ -34,6 +34,9 @@ export interface Recording {
   scheduled_at: string; duration_minutes: number; join_url?: string | null;
   published_at: string | null; announce_at: string | null; announced_at: string | null;
   source: RecordingSource; calendly_event_id?: string | null;
+  /** Set when a PUBLISHED session is called off. It is kept, with its RSVPs and
+   *  questions, so the people who were invited are told rather than finding nothing. */
+  cancelled_at?: string | null;
 }
 
 export interface Rsvp {
@@ -61,6 +64,19 @@ export interface QuestionLink {
 
 export interface PrayerRequest {
   id: string; profile_id: string; body: string; status: string; submitted_at: string;
+}
+
+/** "Reach out to us" — a separate model from PrayerRequest on purpose: a prayer
+ *  request is pastorally a different thing from "can we move Thursday". One way,
+ *  leadership only, in both directions. */
+export interface Message {
+  id: string; profile_id: string; body: string; status: string; submitted_at: string;
+}
+
+/** A submission from the public interest form. No account behind it. */
+export interface Inquiry {
+  id: string; name: string; email: string; phone?: string | null; note?: string | null;
+  source: string; handled: boolean; handled_at?: string | null; submitted_at: string;
 }
 
 export interface Note {

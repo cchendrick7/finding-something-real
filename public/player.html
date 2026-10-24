@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex">
+<title>Finding Something Real — player</title>
+<!--
+  THE EPISODE PLAYER, SERVED FROM OUR OWN ORIGIN.
+
+  This page exists because of one fact about YouTube's embed: it will not serve
+  a video to a page whose origin it does not believe.
+
+  Build 8 and build 9 put this same markup straight into a React Native WebView
+  with `loadHTMLString(html, baseURL: "https://www.youtube.com")`. That seemed
+  reasonable — the embed wants a YouTube origin, so give it one — and it is
+  wrong. The page claims to be youtube.com without being served from there, and
+  YouTube answers "This video is unavailable. Error code: 152". A phone showed
+  that; nothing in the test suite could have.
+
+  So the player page is a real page, at a real HTTPS address, on the domain this
+  ministry already publishes from. It is copied into dist/ by `expo export`
+  (everything in public/ is) and deployed by scripts/host.mjs alongside the web
+  app. That is exactly the shape react-native-youtube-iframe settled on after
+  the same fight — it serves its player from a page it controls rather than
+  faking an origin.
+
+  TWO CONSEQUENCES, BOTH WANTED:
+
+  · It can be tested. scripts/player-test.mjs opens this page in a real browser
+    and asserts the YouTube player reaches `ready` with a real duration. The
+    thing that broke twice is now the thing that is checked.
+  · It can be fixed without shipping an app build, because it is a static file
+    on a website.
+
+  This page talks to the app over `window.ReactNativeWebView.postMessage`, and
+  keeps the same events on `window.__fsrEvents` so a browser can read them too.
+  It never receives anything from the app — there is no injected script and no
+  command channel, so there is nothing here for a hostile page to reach.
+-->
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  #player, iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  /* If the API never arrives, this is what is behind it — not a black void. */
+  #nope {
+    position: absolute; inset: 0; display: none; color: #FBFAF9; background: #000;
+    font: 15px/1.5 -apple-system, system-ui, sans-serif;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+  }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<div id="nope">The player could not start.</div>
+<script>
+(function () {
+  'use strict';
+
+  /** Events go to the app when there is one, and to the page always. */
+  function send(payload) {
+    try { window.__fsrEvents.push(payload); } catch (e) { window.__fsrEvents = [payload]; }
+    try {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+      }
+    } catch (e) { /* not in the app; the array above is the record */ }
+  }
+  window.__fsrEvents = [];
+
+  var params = new URLSearchParams(window.location.search);
+  var videoId = params.get('v') || '';
+  var startAt = parseInt(params.get('start') || '0', 10);
+  if (!isFinite(startAt) || startAt < 0) startAt = 0;
+
+  // Nothing from a query string reaches the YouTube call without matching this.
+  if (!/^[A-Za-z0-9_-]{6,24}$/.test(videoId)) {
+    document.getElementById('nope').style.display = 'flex';
+    send({ t: 'error', message: 'bad video id' });
+    return;
+  }
+
+  var player = null;
+  var ticker = null;
+
+  function report() {
+    if (!player || !player.getCurrentTime) return;
+    send({
+      t: 'time',
+      at: player.getCurrentTime() || 0,
+      dur: (player.getDuration && player.getDuration()) || 0
+    });
+  }
+
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player('player', {
+      videoId: videoId,
+      playerVars: {
+        // Keeps playback in the page on iPhone instead of throwing the system
+        // fullscreen player over the top of the app.
+        playsinline: 1,
+        // Since 2018 rel:0 means "related videos from this channel only",
+        // which is as close as YouTube still allows to not sending the
+        // audience somewhere else at the end.
+        rel: 0,
+        modestbranding: 1,
+        start: startAt
+      },
+      events: {
+        onReady: function () {
+          send({ t: 'ready', dur: (player.getDuration && player.getDuration()) || 0 });
+        },
+        onStateChange: function (e) {
+          if (e.data === 1) {                       // playing
+            report();
+            if (ticker) clearInterval(ticker);
+            ticker = setInterval(report, 4000);
+          } else {
+            if (ticker) { clearInterval(ticker); ticker = null; }
+            if (e.data === 0) { report(); send({ t: 'ended' }); }
+            else if (e.data === 2) { report(); }    // paused
+          }
+        },
+        // 2 bad id · 5 html5 player · 100 gone or private ·
+        // 101 and 150 embedding refused by the owner.
+        onError: function (e) { send({ t: 'error', code: e && e.data }); }
+      }
+    });
+  };
+
+  window.onerror = function (m) { send({ t: 'error', message: String(m) }); };
+
+  var s = document.createElement('script');
+  s.src = 'https://www.youtube.com/iframe_api';
+  s.onerror = function () {
+    document.getElementById('nope').style.display = 'flex';
+    send({ t: 'error', message: 'iframe_api' });
+  };
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>

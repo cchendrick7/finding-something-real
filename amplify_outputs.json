@@ -640,6 +640,20 @@
               "isRequired": false,
               "attributes": []
             },
+            "announcedFor": {
+              "name": "announcedFor",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "cancelledAt": {
+              "name": "cancelledAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
             "source": {
               "name": "source",
               "isArray": false,
@@ -1406,6 +1420,96 @@
             "sortKeyFieldNames": []
           }
         },
+        "Message": {
+          "name": "Message",
+          "fields": {
+            "id": {
+              "name": "id",
+              "isArray": false,
+              "type": "ID",
+              "isRequired": true,
+              "attributes": []
+            },
+            "owner": {
+              "name": "owner",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "profileId": {
+              "name": "profileId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "body": {
+              "name": "body",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "status": {
+              "name": "status",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "createdAt": {
+              "name": "createdAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            },
+            "updatedAt": {
+              "name": "updatedAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            }
+          },
+          "syncable": true,
+          "pluralName": "Messages",
+          "attributes": [
+            {
+              "type": "model",
+              "properties": {}
+            },
+            {
+              "type": "auth",
+              "properties": {
+                "rules": [
+                  {
+                    "groupClaim": "cognito:groups",
+                    "provider": "userPools",
+                    "allow": "groups",
+                    "groups": [
+                      "leadership"
+                    ],
+                    "operations": [
+                      "create",
+                      "update",
+                      "delete",
+                      "read"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "primaryKeyInfo": {
+            "isCustomPrimaryKey": false,
+            "primaryKeyFieldName": "id",
+            "sortKeyFieldNames": []
+          }
+        },
         "Note": {
           "name": "Note",
           "fields": {
@@ -1642,6 +1746,138 @@
             "sortKeyFieldNames": []
           }
         },
+        "PushToken": {
+          "name": "PushToken",
+          "fields": {
+            "id": {
+              "name": "id",
+              "isArray": false,
+              "type": "ID",
+              "isRequired": true,
+              "attributes": []
+            },
+            "token": {
+              "name": "token",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "profileId": {
+              "name": "profileId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "platform": {
+              "name": "platform",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "deviceLabel": {
+              "name": "deviceLabel",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "wantsSessions": {
+              "name": "wantsSessions",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "wantsReminders": {
+              "name": "wantsReminders",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "wantsNotes": {
+              "name": "wantsNotes",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "wantsEpisodes": {
+              "name": "wantsEpisodes",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "lastSeenAt": {
+              "name": "lastSeenAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "retiredAt": {
+              "name": "retiredAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "createdAt": {
+              "name": "createdAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            },
+            "updatedAt": {
+              "name": "updatedAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            }
+          },
+          "syncable": true,
+          "pluralName": "PushTokens",
+          "attributes": [
+            {
+              "type": "model",
+              "properties": {}
+            },
+            {
+              "type": "auth",
+              "properties": {
+                "rules": [
+                  {
+                    "groupClaim": "cognito:groups",
+                    "provider": "userPools",
+                    "allow": "groups",
+                    "groups": [
+                      "leadership"
+                    ],
+                    "operations": [
+                      "create",
+                      "update",
+                      "delete",
+                      "read"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "primaryKeyInfo": {
+            "isCustomPrimaryKey": false,
+            "primaryKeyFieldName": "id",
+            "sortKeyFieldNames": []
+          }
+        },
         "NotificationLog": {
           "name": "NotificationLog",
           "fields": {
@@ -1656,7 +1892,7 @@
               "name": "profileId",
               "isArray": false,
               "type": "String",
-              "isRequired": true,
+              "isRequired": false,
               "attributes": []
             },
             "kind": {
@@ -1689,10 +1925,24 @@
               "isRequired": false,
               "attributes": []
             },
+            "dedupeKey": {
+              "name": "dedupeKey",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
             "sentAt": {
               "name": "sentAt",
               "isArray": false,
               "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "deviceCount": {
+              "name": "deviceCount",
+              "isArray": false,
+              "type": "Int",
               "isRequired": false,
               "attributes": []
             },
@@ -1819,6 +2069,119 @@
           },
           "syncable": true,
           "pluralName": "Episodes",
+          "attributes": [
+            {
+              "type": "model",
+              "properties": {}
+            },
+            {
+              "type": "auth",
+              "properties": {
+                "rules": [
+                  {
+                    "groupClaim": "cognito:groups",
+                    "provider": "userPools",
+                    "allow": "groups",
+                    "groups": [
+                      "leadership"
+                    ],
+                    "operations": [
+                      "create",
+                      "update",
+                      "delete",
+                      "read"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "primaryKeyInfo": {
+            "isCustomPrimaryKey": false,
+            "primaryKeyFieldName": "id",
+            "sortKeyFieldNames": []
+          }
+        },
+        "Inquiry": {
+          "name": "Inquiry",
+          "fields": {
+            "id": {
+              "name": "id",
+              "isArray": false,
+              "type": "ID",
+              "isRequired": true,
+              "attributes": []
+            },
+            "name": {
+              "name": "name",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "email": {
+              "name": "email",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true,
+              "attributes": []
+            },
+            "phone": {
+              "name": "phone",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "note": {
+              "name": "note",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "source": {
+              "name": "source",
+              "isArray": false,
+              "type": {
+                "enum": "InquirySource"
+              },
+              "isRequired": false,
+              "attributes": []
+            },
+            "handled": {
+              "name": "handled",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "handledAt": {
+              "name": "handledAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "createdAt": {
+              "name": "createdAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            },
+            "updatedAt": {
+              "name": "updatedAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": [],
+              "isReadOnly": true
+            }
+          },
+          "syncable": true,
+          "pluralName": "Inquiries",
           "attributes": [
             {
               "type": "model",
@@ -2056,6 +2419,13 @@
             "internal"
           ]
         },
+        "InquirySource": {
+          "name": "InquirySource",
+          "values": [
+            "app",
+            "website"
+          ]
+        },
         "PublicEpisodeKind": {
           "name": "PublicEpisodeKind",
           "values": [
@@ -2182,6 +2552,13 @@
               "name": "yourQuestion",
               "isArray": false,
               "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "cancelledAt": {
+              "name": "cancelledAt",
+              "isArray": false,
+              "type": "AWSDateTime",
               "isRequired": false,
               "attributes": []
             }
@@ -2342,6 +2719,20 @@
           },
           "isRequired": false,
           "isArrayNullable": true
+        },
+        "myPushPrefs": {
+          "name": "myPushPrefs",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "token": {
+              "name": "token",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
         }
       },
       "mutations": {
@@ -2431,6 +2822,20 @@
             }
           }
         },
+        "sendMessage": {
+          "name": "sendMessage",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "body": {
+              "name": "body",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        },
         "submitPrayerRequest": {
           "name": "submitPrayerRequest",
           "isArray": false,
@@ -2450,6 +2855,210 @@
           "isArray": false,
           "type": "AWSJSON",
           "isRequired": false
+        },
+        "registerPushToken": {
+          "name": "registerPushToken",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "token": {
+              "name": "token",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "platform": {
+              "name": "platform",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            },
+            "deviceLabel": {
+              "name": "deviceLabel",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            }
+          }
+        },
+        "registerListenerPushToken": {
+          "name": "registerListenerPushToken",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "token": {
+              "name": "token",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "platform": {
+              "name": "platform",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            }
+          }
+        },
+        "setPushPrefs": {
+          "name": "setPushPrefs",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "token": {
+              "name": "token",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "wantsSessions": {
+              "name": "wantsSessions",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false
+            },
+            "wantsReminders": {
+              "name": "wantsReminders",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false
+            },
+            "wantsNotes": {
+              "name": "wantsNotes",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false
+            },
+            "wantsEpisodes": {
+              "name": "wantsEpisodes",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false
+            }
+          }
+        },
+        "unregisterPushToken": {
+          "name": "unregisterPushToken",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "token": {
+              "name": "token",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        },
+        "submitInterest": {
+          "name": "submitInterest",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "name": {
+              "name": "name",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "email": {
+              "name": "email",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "phone": {
+              "name": "phone",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            },
+            "note": {
+              "name": "note",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            }
+          }
+        },
+        "provisionCohost": {
+          "name": "provisionCohost",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "email": {
+              "name": "email",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "displayName": {
+              "name": "displayName",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "timezone": {
+              "name": "timezone",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            }
+          }
+        },
+        "resetCohostPassword": {
+          "name": "resetCohostPassword",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "profileId": {
+              "name": "profileId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        },
+        "withdrawRecording": {
+          "name": "withdrawRecording",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "recordingId": {
+              "name": "recordingId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        },
+        "setCohostActive": {
+          "name": "setCohostActive",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "profileId": {
+              "name": "profileId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "active": {
+              "name": "active",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": true
+            }
+          }
         }
       }
     }

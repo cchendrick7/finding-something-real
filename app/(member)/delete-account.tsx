@@ -7,6 +7,7 @@ import {
   Screen, Display, Body, Small, Tiny, Card, Eyebrow, Rule, Button, Field,
 } from '@/components/ui';
 import { space, color } from '@/lib/theme';
+import { SUPPORT_EMAIL } from '@/lib/ministry';
 
 /**
  * Delete your account.
@@ -32,13 +33,17 @@ export default function DeleteAccount() {
   async function go() {
     setErr(null); setBusy(true);
     try {
+      // Takes no id: the Lambda deletes the caller, rows first, Cognito user last.
       await deleteMyAccount();
-      await signOut();
-      router.replace('/(public)/listen');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not delete the account.');
       setBusy(false);
+      return;
     }
+    // The account is gone by now. If signing out of the dead session fails,
+    // that changes nothing for her — go to Listen either way.
+    try { await signOut(); } catch {}
+    router.replace('/(public)/listen');
   }
 
   return (
@@ -64,6 +69,7 @@ export default function DeleteAccount() {
           'Your prayer requests',
           'Questions you submitted, and any you asked on a session',
           'Which notes you have opened',
+          'This phone, and every notification we have sent it',
         ].map((t) => (
           <Small key={t} style={{ marginTop: 5 }}>· {t}</Small>
         ))}
@@ -102,7 +108,7 @@ export default function DeleteAccount() {
               onPress={() => router.back()} />
 
       <Tiny style={{ textAlign: 'center', marginTop: space.xl, color: color.faint }}>
-        Would rather talk to someone first? Email hello@findingsomethingreal.com.
+        Would rather talk to someone first? Email {SUPPORT_EMAIL}.
       </Tiny>
     </Screen>
   );

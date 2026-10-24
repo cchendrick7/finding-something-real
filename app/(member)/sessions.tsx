@@ -53,9 +53,12 @@ export default function Sessions() {
               <Small>{formatDate(r.scheduled_at, tz)}</Small><Small>·</Small>
               <Small>{formatTime(r.scheduled_at, tz)} {zoneAbbr(r.scheduled_at, tz)}</Small>
             </Row>
-            <H3>{r.title}</H3>
+            {/* A published session is called off, not erased: it stays in the list, struck through. */}
+            <H3 style={r.cancelled_at ? { textDecorationLine: 'line-through' } : undefined}>{r.title}</H3>
             {g ? <Small style={{ marginTop: 2, marginBottom: 10 }}>{g.name}</Small> : <View style={{ height: 10 }} />}
-            <Pill label={st.l} tone={st.t} />
+            {r.cancelled_at
+              ? <Pill label="Called off" tone="muted" />
+              : <Pill label={st.l} tone={st.t} />}
           </Card>
         );
       })}

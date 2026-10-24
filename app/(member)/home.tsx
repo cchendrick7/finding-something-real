@@ -3,15 +3,16 @@ import { View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
 import {
-  listRecordings, unreadNoteFor, listEpisodes, getGuest, getMyRsvp, setRsvp,
+  listRecordings, unreadNoteFor, listPublicEpisodes, getGuest, getMyRsvp, setRsvp,
 } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr, isUnsociable } from '@/lib/tz';
 import {
   Screen, Display, H2, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Button, Pill, Row,
 } from '@/components/ui';
 import { color, space } from '@/lib/theme';
-import type { Recording, Note, Episode, Guest, Rsvp } from '@/lib/types';
+import type { Recording, Note, PublicEpisode, Guest, Rsvp } from '@/lib/types';
 import { onLoadError } from '@/lib/loadError';
+import { CohostNotificationsCard } from '@/components/notifications';
 
 export default function Home() {
   const { profile } = useSession();
@@ -20,7 +21,7 @@ export default function Home() {
   const [next, setNext] = useState<Recording | null>(null);
   const [guest, setGuest] = useState<Guest | null>(null);
   const [rsvp, setRsvpState] = useState<Rsvp | null>(null);
-  const [ep, setEp] = useState<Episode | null>(null);
+  const [ep, setEp] = useState<PublicEpisode | null>(null);
 
   const load = useCallback(() => {
     if (!profile) return;
@@ -33,7 +34,10 @@ export default function Home() {
         setGuest(await getGuest(n.guest_id));
         setRsvpState(await getMyRsvp(n.id, profile.id));
       }
-      setEp((await listEpisodes())[0] ?? null);
+      // The same YouTube-synced rows the public Listen tab reads (newest first),
+      // so a co-host does not get less than a stranger who installed the app.
+      // A short is not "the latest episode".
+      setEp((await listPublicEpisodes()).find((e) => e.kind === 'episode') ?? null);
     })().catch(onLoadError);
   }, [profile]);
 
@@ -52,6 +56,10 @@ export default function Home() {
       <Eyebrow>{formatDate(new Date().toISOString(), tz)}</Eyebrow>
       <Display>Hi, {profile.display_name}</Display>
       <Rule style={{ marginVertical: space.md }} />
+
+      {/* Above the note and the next session: co-hosts were never asked about
+          notifications. Renders nothing once she is set up. */}
+      <CohostNotificationsCard />
 
       {note ? (
         <Card tone="ink" onPress={() => router.push('/(member)/note')}>
@@ -127,12 +135,12 @@ export default function Home() {
         <>
           <Eyebrow>Latest episode</Eyebrow>
           <Card tone="blueSolid" testID="latest-episode"
-                onPress={() => router.push('/(member)/episodes')}>
+                onPress={() => router.push(`/episode/${ep.video_id}`)}>
             <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <View style={{ flex: 1, paddingRight: space.md }}>
                 <H3 style={{ color: color.white }}>{ep.title}</H3>
                 <Tiny style={{ color: 'rgba(255,255,255,0.75)', marginTop: 4 }}>
-                  Episode {ep.number} · out now
+                  {formatDate(ep.published_at, tz)} · tap to play
                 </Tiny>
               </View>
               <Tiny style={{ color: 'rgba(255,255,255,0.9)', fontSize: 18, marginTop: 2 }}>▸</Tiny>

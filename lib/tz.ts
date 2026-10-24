@@ -4,6 +4,12 @@
  * All timestamps are stored UTC and rendered in the viewer's own zone. Several
  * co-hosts this season are overseas, so a 6pm Pacific recording is 3am for
  * them — the app has to say so rather than quietly showing Pacific.
+ *
+ * .format() ONLY. Intl formatToParts is only partly implemented on Hermes: it
+ * dropped hour/minute/timeZoneName, so times read "undefined:undefined".
+ * Every function here goes through
+ * one code path on every engine — format a string, read it back — and
+ * scripts/render-test.mjs covers it.
  */
 
 export const COMMON_ZONES = [
@@ -26,29 +32,33 @@ export function detectZone(): string {
   }
 }
 
-function parts(iso: string, tz: string) {
-  const d = new Date(iso);
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, weekday: 'short', month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short',
-  });
-  const out: Record<string, string> = {};
-  for (const p of fmt.formatToParts(d)) out[p.type] = p.value;
-  return out;
+function fmt(tz: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts });
 }
 
+/** "Thu, Sep 10" */
 export function formatDate(iso: string, tz: string): string {
-  const p = parts(iso, tz);
-  return `${p.weekday}, ${p.month} ${p.day}`;
+  return fmt(tz, { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(iso));
 }
 
+/** "6:00pm" — "6:00 PM" with the space (a narrow no-break space on some engines) taken out. */
 export function formatTime(iso: string, tz: string): string {
-  const p = parts(iso, tz);
-  return `${p.hour}:${p.minute}${(p.dayPeriod || '').toLowerCase()}`;
+  return fmt(tz, { hour: 'numeric', minute: '2-digit', hour12: true })
+    .format(new Date(iso))
+    .replace(/\s+/g, '')
+    .toLowerCase();
 }
 
+/**
+ * "PDT", "GMT+3". Format the hour with and without the zone name and take the
+ * difference — what is left is the zone name, whatever order the engine puts
+ * it in.
+ */
 export function zoneAbbr(iso: string, tz: string): string {
-  return parts(iso, tz).timeZoneName || '';
+  const d = new Date(iso);
+  const withZone = fmt(tz, { hour: 'numeric', timeZoneName: 'short' }).format(d);
+  const hourOnly = fmt(tz, { hour: 'numeric' }).format(d);
+  return withZone.replace(hourOnly, '').replace(/^[\s,]+|[\s,]+$/g, '');
 }
 
 export function formatFull(iso: string, tz: string): string {
@@ -57,10 +67,7 @@ export function formatFull(iso: string, tz: string): string {
 
 /** Local hour 0-23 for a UTC instant in a given zone. */
 export function localHour(iso: string, tz: string): number {
-  const h = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hour: 'numeric', hour12: false,
-  }).format(new Date(iso));
-  return parseInt(h, 10) % 24;
+  return wallClock(new Date(iso), tz).hour;
 }
 
 /**
@@ -79,6 +86,39 @@ export function inQuietHours(at: Date, tz: string): boolean {
   return h >= 21 || h < 8;
 }
 
+export type WallClock = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+/**
+ * The wall-clock fields of an instant in `tz`, read out of one formatted
+ * string ("09/10/2026, 18:00:00" in en-US) rather than formatToParts.
+ */
+export function wallClock(at: Date, tz: string): WallClock {
+  const s = fmt(tz, {
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(at);
+  const m = s.match(/(\d+)\D+(\d+)\D+(\d+)\D+(\d+)\D+(\d+)\D+(\d+)/);
+  if (!m) throw new Error(`Cannot read the wall clock in ${tz} from "${s}"`);
+  const [, month, day, year, hour, minute, second] = m;
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    // Some engines render midnight as hour 24 under hour12:false.
+    hour: Number(hour) % 24,
+    minute: Number(minute),
+    second: Number(second),
+  };
+}
+
 /* --------------------------------------------------- writing a time back */
 
 /**
@@ -90,20 +130,8 @@ export function inQuietHours(at: Date, tz: string): boolean {
  * which is what makes it DST-correct rather than a fixed guess.
  */
 function zoneOffsetMs(utcMs: number, tz: string): number {
-  const p: Record<string, string> = {};
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-  for (const x of fmt.formatToParts(new Date(utcMs))) p[x.type] = x.value;
-  // Some engines render midnight as hour 24 under hour12:false.
-  const hour = p.hour === '24' ? '00' : p.hour;
-  const asIfUtc = Date.UTC(
-    Number(p.year), Number(p.month) - 1, Number(p.day),
-    Number(hour), Number(p.minute), Number(p.second),
-  );
-  return asIfUtc - utcMs;
+  const w = wallClock(new Date(utcMs), tz);
+  return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second) - utcMs;
 }
 
 /**
@@ -126,13 +154,10 @@ export function zonedToUtcIso(date: string, time: string, tz: string): string {
 
 /** Inverse of zonedToUtcIso — for prefilling an edit form. */
 export function utcIsoToZonedFields(iso: string, tz: string): { date: string; time: string } {
-  const p: Record<string, string> = {};
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit',
-  });
-  for (const x of fmt.formatToParts(new Date(iso))) p[x.type] = x.value;
-  const hour = p.hour === '24' ? '00' : p.hour;
-  return { date: `${p.year}-${p.month}-${p.day}`, time: `${hour}:${p.minute}` };
+  const w = wallClock(new Date(iso), tz);
+  const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+  return {
+    date: `${pad(w.year, 4)}-${pad(w.month)}-${pad(w.day)}`,
+    time: `${pad(w.hour)}:${pad(w.minute)}`,
+  };
 }

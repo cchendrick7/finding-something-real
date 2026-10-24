@@ -14,6 +14,7 @@ import {
 import { space, color } from '@/lib/theme';
 import type { Guest, Profile } from '@/lib/types';
 import { onLoadError } from '@/lib/loadError';
+import { STUDIO_URL } from '@/lib/ministry';
 
 /**
  * Create or edit a session.
@@ -48,6 +49,9 @@ export default function RecordingForm() {
   const [topic, setTopic] = useState('');
   const [questions, setQuestions] = useState('');
   const [joinUrl, setJoinUrl] = useState('');
+  // True when the join link below was filled in for her rather than loaded
+  // from the session, so the hint can say so.
+  const [prefilled, setPrefilled] = useState(false);
 
   const tz = profile?.timezone ?? 'America/Los_Angeles';
 
@@ -73,6 +77,14 @@ export default function RecordingForm() {
         // two taps rather than typing a date from scratch.
         const d = new Date(Date.now() + 14 * 864e5);
         setDate(utcIsoToZonedFields(d.toISOString(), tz).date);
+        // The studio is the same room every time. Start from the link the most
+        // recent session used, or the ministry's studio (lib/ministry) if none
+        // has one yet, so "Join on Riverside" has somewhere to go.
+        const latest = (await listRecordings(true))
+          .filter((r) => r.join_url)
+          .sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at))[0];
+        setJoinUrl(latest?.join_url || STUDIO_URL);
+        setPrefilled(true);
       }
       setLoaded(true);
     })().catch(onLoadError);
@@ -209,8 +221,10 @@ export default function RecordingForm() {
                  placeholder={'If God is good, why is there so much pain?\nIs suffering evidence against God?'}
                  hint="One question per line." />
           <Field label="Join link" value={joinUrl} onChangeText={setJoinUrl} testID="f-joinurl"
-                 autoCapitalize="none" placeholder="https://riverside.fm/studio/fsr"
-                 hint="Only shown to co-hosts once the session is published." />
+                 autoCapitalize="none" placeholder="https://riverside.com/studio/…"
+                 hint={prefilled
+                   ? 'The FSR studio link, filled in for you. Change it only if this session is somewhere else.'
+                   : 'The studio link is the same every time. Leave it as it is unless this session is somewhere else.'} />
 
           {err ? <Tiny style={{ color: color.danger, marginBottom: 10 }} testID="form-error">{err}</Tiny> : null}
 

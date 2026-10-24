@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
+import { View, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSession } from '@/lib/session';
 import {
@@ -27,13 +27,16 @@ export default function SessionDetail() {
   const [mine, setMine] = useState<IntakeQuestion | null>(null);
   const [q, setQ] = useState('');
   const [sent, setSent] = useState(false);
+  const [missing, setMissing] = useState(false);
 
   const load = useCallback(() => {
     if (!profile || !id) return;
     (async () => {
       const r = await getRecording(id);
       setRec(r);
-      if (!r) return;
+      // Withdrawn by leadership (or never existed). Say so rather than load forever.
+      if (!r) { setMissing(true); return; }
+      setMissing(false);
       await markRead(profile.id, 'recording', r.id);
       const g = await getGuest(r.guest_id);
       setGuest(g);
@@ -45,7 +48,26 @@ export default function SessionDetail() {
   }, [id, profile]);
 
   useFocusEffect(load);
+
+  if (missing) {
+    return (
+      <Screen>
+        <Eyebrow>Not found</Eyebrow>
+        <H1>This session was withdrawn</H1>
+        <Body style={{ marginTop: space.md, marginBottom: space.lg }}>
+          Janell has taken it off the schedule. Anything you had already sent in for it has gone
+          with it — if it was a question you still want asked, send it again on another session
+          and it will be picked up.
+        </Body>
+        <Button testID="missing-back" label="Back to sessions" onPress={() => router.replace('/(member)/sessions')} />
+      </Screen>
+    );
+  }
+
   if (!profile || !rec) return <Screen><Body>Loading…</Body></Screen>;
+  // A published session is called off, not erased: RSVPs and questions are kept,
+  // and everyone invited has been told.
+  const cancelled = Boolean(rec.cancelled_at);
   const tz = profile.timezone;
 
   async function answer(response: 'yes' | 'no') {
@@ -53,6 +75,24 @@ export default function SessionDetail() {
     setRsvpState(await setRsvp(rec.id, profile.id, response));
     setAttendees(await listAttendees(rec.id));
   }
+
+  // The question composer. It used to live only behind "can't make it"; a
+  // co-host who is going can send one ahead too.
+  const questionBox = (title: string, hint: string) =>
+    sent ? (
+      <Card tone="wash" testID="question-sent">
+        <Eyebrow>Sent</Eyebrow>
+        <Body>If you're not at the recording, we'll try to ask it for you. You'll get a note when the episode is up.</Body>
+      </Card>
+    ) : (
+      <Card>
+        <H3 style={{ marginBottom: 6 }}>{title}</H3>
+        <Small style={{ marginBottom: space.md }}>{hint}</Small>
+        <Field value={q} onChangeText={setQ} multiline testID="question"
+               placeholder="What would you want to ask?" />
+        <Button testID="send-question" label="Send my question" onPress={sendQuestion} disabled={!q.trim()} />
+      </Card>
+    );
 
   async function sendQuestion() {
     if (!profile || !rec || !q.trim()) return;
@@ -119,10 +159,7 @@ export default function SessionDetail() {
           ))}
         </Wrap>
         <Rule style={{ marginVertical: space.md }} />
-        <Tiny>
-          Only co-hosts who said yes appear here. If you can't make it, that stays between
-          you and the team.
-        </Tiny>
+        <Tiny>Only co-hosts who said yes appear here.</Tiny>
       </Card>
 
       {isUnsociable(rec.scheduled_at, tz) ? (
@@ -137,7 +174,16 @@ export default function SessionDetail() {
 
       <Rule />
 
-      {!rsvp ? (
+      {cancelled ? (
+        <Card tone="blush" testID="session-cancelled">
+          <Eyebrow tone={color.danger}>Called off</Eyebrow>
+          <H3 style={{ marginBottom: 6 }}>This recording is not happening</H3>
+          <Body>
+            Janell has taken it off the schedule. Nothing is needed from you. If it comes back it
+            will appear again with the new time, and you'll be told.
+          </Body>
+        </Card>
+      ) : !rsvp ? (
         <>
           <Eyebrow>Can you make it?</Eyebrow>
           <Row>
@@ -150,46 +196,55 @@ export default function SessionDetail() {
           </Row>
         </>
       ) : rsvp.response === 'yes' ? (
-        <Card tone="sage">
-          <Row style={{ justifyContent: 'space-between', marginBottom: space.md }}>
-            <Pill label="You're going" tone="sage" />
-            <Tiny style={{ textDecorationLine: 'underline' }} onPress={() => answer('no')}>Change</Tiny>
-          </Row>
-          <Button label="Join on Riverside" />
-          <Tiny style={{ textAlign: 'center', marginTop: 10 }}>
-            Link opens 10 minutes before we start
-          </Tiny>
-          <Rule style={{ marginVertical: space.md }} />
-          <Tiny style={{ textAlign: 'center' }}>
-            We'll remind you 24 hours and 1 hour before — no texts needed.
-          </Tiny>
-          <Tiny style={{ textAlign: 'center', marginTop: 8, textDecorationLine: 'underline' }}>
-            Add to my calendar
-          </Tiny>
-        </Card>
-      ) : (
-        <Card>
-          <Row style={{ justifyContent: 'space-between', marginBottom: space.md }}>
-            <Pill label="Not attending" tone="muted" />
-            <Tiny style={{ textDecorationLine: 'underline' }} onPress={() => answer('yes')}>Change</Tiny>
-          </Row>
-          {sent ? (
-            <>
-              <Eyebrow>Sent</Eyebrow>
-              <Body>We'll ask it for you. You'll get a note when the episode is up.</Body>
-            </>
-          ) : (
-            <>
-              <H3 style={{ marginBottom: 6 }}>Still want to be part of it?</H3>
-              <Small style={{ marginBottom: space.md }}>
-                Send a question and we'll ask {guest?.name ?? 'our guest'} on your behalf.
-              </Small>
-              <Field value={q} onChangeText={setQ} multiline testID="question"
-                     placeholder="What would you want to ask?" />
-              <Button testID="send-question" label="Send my question" onPress={sendQuestion} disabled={!q.trim()} />
-            </>
+        <>
+          <Card tone="sage">
+            <Row style={{ justifyContent: 'space-between', marginBottom: space.md }}>
+              <Pill label="You're going" tone="sage" />
+              <Tiny style={{ textDecorationLine: 'underline' }} onPress={() => answer('no')}>Change</Tiny>
+            </Row>
+            {/* "Join on Riverside" was never wired. It opens the link now, and
+                says so plainly when there is no link yet. */}
+            {rec.join_url ? (
+              <>
+                <Button
+                  testID="join-session"
+                  label="Join on Riverside"
+                  onPress={() => {
+                    Linking.openURL(rec.join_url!).catch(onLoadError);
+                  }}
+                />
+                <Tiny style={{ textAlign: 'center', marginTop: 10 }}>
+                  If possible, the best time to join is 10 minutes before the scheduled recording time.
+                </Tiny>
+              </>
+            ) : (
+              <Tiny testID="join-pending" style={{ textAlign: 'center' }}>
+                The join link appears here once Janell adds it — usually a day or two before.
+              </Tiny>
+            )}
+            <Rule style={{ marginVertical: space.md }} />
+            <Tiny style={{ textAlign: 'center' }}>
+              We'll remind you 24 hours and 1 hour before — no texts needed.
+            </Tiny>
+          </Card>
+          {questionBox(
+            'Anything you want us to ask?',
+            `Send it ahead and if there's time we'll put it to ${guest?.name ?? 'our guest'} on the day.`,
           )}
-        </Card>
+        </>
+      ) : (
+        <>
+          <Card>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Pill label="Not attending" tone="muted" />
+              <Tiny style={{ textDecorationLine: 'underline' }} onPress={() => answer('yes')}>Change</Tiny>
+            </Row>
+          </Card>
+          {questionBox(
+            'Still want to be part of it?',
+            `Send a question and we'll do our best to ask ${guest?.name ?? 'our guest'} on your behalf.`,
+          )}
+        </>
       )}
     </Screen>
   );

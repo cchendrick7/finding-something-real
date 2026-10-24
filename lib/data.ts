@@ -16,9 +16,10 @@
  */
 import { DEMO_MODE, client } from './amplify';
 import * as fx from './demo';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import type {
   Profile, Recording, Rsvp, Note, Guest, Question, IntakeQuestion,
-  PrayerRequest, Episode, FsrEvent, Receipt, QuestionLink, PublicEpisode,
+  PrayerRequest, Message, Inquiry, Episode, FsrEvent, Receipt, QuestionLink, PublicEpisode,
 } from './types';
 
 export { DEMO_MODE };
@@ -34,6 +35,7 @@ const db = {
   intake: fx.intakeQuestions.map((q) => ({ ...q })),
   links: fx.questionLinks.map((l) => ({ ...l })),
   prayers: fx.prayerRequests.map((p) => ({ ...p })),
+  messages: fx.messages.map((m) => ({ ...m })),
   receipts: fx.receipts.map((r) => ({ ...r })),
   episodes: [...fx.episodes],
   events: [...fx.events],
@@ -44,6 +46,27 @@ const nowIso = () => new Date().toISOString();
 const uid = () => `id-${Math.random().toString(36).slice(2, 10)}`;
 const unwrap = <T,>(r: { data?: T | null }): T | null => (r?.data ?? null);
 const unwrapList = <T,>(r: { data?: T[] | null }): T[] => (r?.data ?? []);
+
+/**
+ * Read an AWSJSON result.
+ *
+ * A custom mutation declared with `a.json()` does not hand the client an
+ * object. It hands it the JSON TEXT: `{"ok":true}` arrives as an eleven
+ * character string, `.ok` on a string is undefined, and every caller read a
+ * success as a failure. Parse a string; pass an object through untouched (in
+ * case the library ever starts decoding it); anything else, or text that is
+ * not JSON, is the fallback.
+ */
+const awsJson = <T,>(raw: unknown, fallback: T): T => {
+  if (raw == null) return fallback;
+  if (typeof raw === 'object') return raw as T;
+  if (typeof raw !== 'string') return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+};
 
 /**
  * Paginating list.
@@ -125,6 +148,21 @@ export async function listMembers(): Promise<Profile[]> {
   return unwrapList(await client.models.Profile.list({ limit: 200 })).map(fromProfileModel);
 }
 
+/**
+ * Leadership's People screen: everyone, including removed accounts, which sort
+ * to the bottom so they can be found and restored without crowding the list.
+ */
+export async function listPeople(): Promise<Profile[]> {
+  if (DEMO_MODE) return [...db.profiles];
+  const rows = await listAll(client.models.Profile.list, {});
+  return rows
+    .map(fromProfileModel)
+    .sort((a, b) =>
+      (a.status === 'removed') !== (b.status === 'removed')
+        ? (a.status === 'removed' ? 1 : -1)
+        : a.display_name.localeCompare(b.display_name));
+}
+
 export async function updateMyProfile(
   id: string, patch: Partial<Pick<Profile, 'display_name' | 'timezone'>>,
 ) {
@@ -145,20 +183,38 @@ export async function updateMyProfile(
 /* --------------------------------------------------------------- public */
 
 /**
+ * Which auth mode reads PublicEpisode.
+ *
+ * Signed out, it has to be `identityPool`: AppSync authorises as the identity
+ * pool's *unauthenticated* role. Signed in, that did not work — this always
+ * asked as the guest role, and a signed-in co-host got no episodes. So: the
+ * user pool when there is an id token, the guest role otherwise (or if the
+ * session cannot be read at all).
+ */
+async function publicReadMode(): Promise<'userPool' | 'identityPool'> {
+  try {
+    const session = await fetchAuthSession();
+    return session.tokens?.idToken ? 'userPool' : 'identityPool';
+  } catch {
+    return 'identityPool';
+  }
+}
+
+/**
  * The ministry's YouTube catalogue. THE ONLY DATA PATH THAT WORKS SIGNED OUT.
  *
- * `authMode: 'identityPool'` is what makes that true: it asks AppSync to
- * authorise as the identity pool's *unauthenticated* role instead of with a
- * Cognito user token. PublicEpisode is the one model that role can touch, and
- * it can only read. Do not reach for this auth mode anywhere else — every
- * other model is deliberately unreachable from it, and the security suite
- * signs in as nobody at all to prove that stays true.
+ * The guest (identity pool) role is what makes that true. PublicEpisode is the
+ * one model that role can touch, and it can only read. Do not reach for the
+ * guest role on any other model — every other model is deliberately
+ * unreachable from it, and the security suite signs in as nobody at all to
+ * prove that stays true. (The push and interest mutations below use it too;
+ * they are Lambdas that take no identity, not models.)
  */
 export async function listPublicEpisodes(): Promise<PublicEpisode[]> {
   if (DEMO_MODE) {
     return [...fx.publicEpisodes].sort((a, b) => b.published_at.localeCompare(a.published_at));
   }
-  const rows = await listAll(client.models.PublicEpisode.list, { authMode: 'identityPool' });
+  const rows = await listAll(client.models.PublicEpisode.list, { authMode: await publicReadMode() });
   return rows
     .map((r) => ({
       id: r.id,
@@ -171,6 +227,209 @@ export async function listPublicEpisodes(): Promise<PublicEpisode[]> {
       blurb: r.blurb ?? null,
     }))
     .sort((a, b) => b.published_at.localeCompare(a.published_at));
+}
+
+/* ---------------------------------------------------------- co-host accounts */
+
+/**
+ * Leadership issues co-host accounts; nobody registers themselves.
+ *
+ * All three go through admin-api. provisionCohost takes no role, group or
+ * status — the group is a constant `cohost` in the Lambda — so no input from
+ * here can produce a leader. Reset and deactivate refuse leadership targets,
+ * checked against Cognito group membership rather than Profile.role.
+ */
+export type AdminResult = {
+  ok: boolean;
+  error?: string;
+  profileId?: string;
+  temporaryPassword?: string;
+  emailed?: boolean;
+};
+
+/** These mutations return a.json(), so `data` may be text. See awsJson. */
+const asJson = (raw: unknown): AdminResult | null => {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw as AdminResult;
+  try {
+    return JSON.parse(String(raw)) as AdminResult;
+  } catch {
+    return null;
+  }
+};
+
+/** The temporary password comes back once, to be shown once; she is also emailed it. */
+export async function provisionCohost(
+  email: string, displayName: string, timezone: string,
+): Promise<AdminResult> {
+  if (DEMO_MODE) {
+    return { ok: true, profileId: uid(), temporaryPassword: 'Cedar-Harbor-4192!', emailed: true };
+  }
+  const r = await client.mutations.provisionCohost({ email, displayName, timezone });
+  if (r.errors?.length) return { ok: false, error: r.errors[0].message };
+  return asJson(r.data) ?? { ok: false, error: 'no_response' };
+}
+
+export async function resetCohostPassword(profileId: string): Promise<AdminResult> {
+  if (DEMO_MODE) return { ok: true, temporaryPassword: 'Willow-Compass-8317!' };
+  const r = await client.mutations.resetCohostPassword({ profileId });
+  if (r.errors?.length) return { ok: false, error: r.errors[0].message };
+  return asJson(r.data) ?? { ok: false, error: 'no_response' };
+}
+
+export async function setCohostActive(profileId: string, active: boolean): Promise<AdminResult> {
+  if (DEMO_MODE) {
+    const p = db.profiles.find((x) => x.id === profileId);
+    if (p) p.status = active ? 'active' : 'removed';
+    return { ok: true };
+  }
+  const r = await client.mutations.setCohostActive({ profileId, active });
+  if (r.errors?.length) return { ok: false, error: r.errors[0].message };
+  return asJson(r.data) ?? { ok: false, error: 'no_response' };
+}
+
+/* ----------------------------------------------------------------- push */
+
+/**
+ * A signed-in co-host's device. push-api turns her co-host categories on only
+ * when a device moves from listener to member; a co-host who switched one off
+ * keeps her choice. Failure is false, never a throw.
+ */
+export async function registerMemberPushToken(
+  token: string, platform: string, deviceLabel?: string | null,
+): Promise<boolean> {
+  if (DEMO_MODE) return true;
+  try {
+    const r = await client.mutations.registerPushToken({ token, platform, deviceLabel });
+    return !r.errors?.length;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A listener: no account, new-episode announcements only. Stored against the
+ * device token and no profile, which is why it goes as the guest role.
+ */
+export async function registerListenerPushToken(token: string, platform: string): Promise<boolean> {
+  if (DEMO_MODE) return true;
+  try {
+    const r = await client.mutations.registerListenerPushToken(
+      { token, platform },
+      { authMode: 'identityPool' },
+    );
+    return !r.errors?.length;
+  } catch {
+    return false;
+  }
+}
+
+/* ------------------------------------------------------------- interest */
+
+export interface InterestInput {
+  name: string;
+  email: string;
+  phone?: string | null;
+  note?: string | null;
+}
+
+/**
+ * The public interest form. Signed out, so the guest role, through public-api.
+ * The result is AWSJSON — this is the call that read every success as a
+ * failure until awsJson existed.
+ */
+export async function submitInterest(
+  input: InterestInput,
+): Promise<{ ok: boolean; invalid?: string[] }> {
+  if (DEMO_MODE) return { ok: true };
+  try {
+    const r = await client.mutations.submitInterest(input, { authMode: 'identityPool' });
+    if (r.errors?.length) return { ok: false };
+    const body = awsJson<{ ok?: boolean; invalid?: string[] }>(r.data, {});
+    return { ok: body.ok === true, invalid: body.invalid };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Leadership only. Unanswered first, then newest. */
+export async function listInquiries(): Promise<Inquiry[]> {
+  if (DEMO_MODE) return [];
+  return unwrapList(await client.models.Inquiry.list({ limit: 500 }))
+    .map((q) => ({
+      id: q.id, name: q.name, email: q.email, phone: q.phone, note: q.note,
+      source: q.source ?? 'app',
+      handled: q.handled ?? false,
+      handled_at: q.handledAt,
+      submitted_at: q.createdAt ?? nowIso(),
+    }))
+    .sort((a, b) =>
+      Number(a.handled) - Number(b.handled) || b.submitted_at.localeCompare(a.submitted_at));
+}
+
+export async function markInquiryHandled(id: string, handled: boolean) {
+  if (DEMO_MODE) return;
+  await client.models.Inquiry.update({ id, handled, handledAt: handled ? nowIso() : null });
+}
+
+/* ------------------------------------------------------------- push prefs */
+
+export async function unregisterPushToken(token: string): Promise<boolean> {
+  if (DEMO_MODE) return true;
+  try {
+    const r = await client.mutations.unregisterPushToken(
+      { token },
+      { authMode: 'identityPool' },
+    );
+    return !r.errors?.length;
+  } catch {
+    return false;
+  }
+}
+
+export interface PushPrefs {
+  wantsSessions: boolean;
+  wantsReminders: boolean;
+  wantsNotes: boolean;
+  wantsEpisodes: boolean;
+}
+
+/** Anything not explicitly switched off counts as on. */
+const asPrefs = (raw: unknown): PushPrefs | null => {
+  const p = raw as Partial<PushPrefs> | null;
+  return p && typeof p === 'object'
+    ? {
+        wantsSessions: p.wantsSessions !== false,
+        wantsReminders: p.wantsReminders !== false,
+        wantsNotes: p.wantsNotes !== false,
+        wantsEpisodes: p.wantsEpisodes !== false,
+      }
+    : null;
+};
+
+export async function setPushPrefs(
+  token: string, prefs: Partial<PushPrefs>,
+): Promise<PushPrefs | null> {
+  if (DEMO_MODE) return null;
+  try {
+    const r = await client.mutations.setPushPrefs(
+      { token, ...prefs },
+      { authMode: 'identityPool' },
+    );
+    return asPrefs(r.data);
+  } catch {
+    return null;
+  }
+}
+
+export async function getPushPrefs(token: string): Promise<PushPrefs | null> {
+  if (DEMO_MODE) return null;
+  try {
+    const r = await client.queries.myPushPrefs({ token }, { authMode: 'identityPool' });
+    return asPrefs(r.data);
+  } catch {
+    return null;
+  }
 }
 
 /* -------------------------------------------------------------- recordings */
@@ -310,6 +569,30 @@ export async function publishRecording(id: string, announceAt: string | null) {
     id, publishedAt: nowIso(), announceAt,
     announcedAt: announceAt ? null : nowIso(),
   });
+}
+
+export type WithdrawResult = { ok: boolean; error?: string };
+
+/**
+ * Withdraw a session, through admin-api.
+ *
+ * Six tables point at a recording and none of them cascade — a QuestionLink
+ * left behind would quietly keep marking someone "covered" — so the Lambda
+ * removes the children first. A published session is called off (cancelledAt)
+ * and everyone invited is told once; withdrawing it again deletes it. A draft
+ * goes in one step, because nobody was ever told it existed.
+ */
+export async function withdrawRecording(id: string): Promise<WithdrawResult> {
+  if (DEMO_MODE) {
+    const i = db.recordings.findIndex((r) => r.id === id);
+    if (i < 0) return { ok: false, error: 'not_found' };
+    db.recordings.splice(i, 1);
+    db.rsvps = db.rsvps.filter((r) => r.recording_id !== id);
+    return { ok: true };
+  }
+  const r = await client.mutations.withdrawRecording({ recordingId: id });
+  if (r.errors?.length) return { ok: false, error: 'failed' };
+  return awsJson<WithdrawResult>(r.data, { ok: false, error: 'failed' });
 }
 
 /* -------------------------------------------------------------------- RSVP */
@@ -650,6 +933,36 @@ export async function submitPrayer(me: string, body: string) {
   await client.mutations.submitPrayerRequest({ body });
 }
 
+/* ---------------------------------------------------------------- messages */
+
+/**
+ * "Reach out": a message to leadership. Its own model beside PrayerRequest,
+ * not a kind field on it — the two are pastorally different. Leadership only,
+ * and deliberately one way; the screen says so.
+ */
+export async function sendMessage(me: string, body: string) {
+  if (DEMO_MODE) {
+    db.messages.unshift({ id: uid(), profile_id: me, body, status: 'open', submitted_at: nowIso() });
+    return;
+  }
+  // The caller's identity decides profileId, as with prayers.
+  await client.mutations.sendMessage({ body });
+}
+
+/** Leadership only, like prayer requests. */
+export async function listMessages(): Promise<(Message & { author?: Profile })[]> {
+  const people = await listMembers();
+  const rows: Message[] = DEMO_MODE
+    ? db.messages
+    : unwrapList(await client.models.Message.list({ limit: 500 })).map((m) => ({
+        id: m.id, profile_id: m.profileId, body: m.body,
+        status: m.status ?? 'open', submitted_at: m.createdAt ?? nowIso(),
+      }));
+  return rows
+    .sort((a, b) => b.submitted_at.localeCompare(a.submitted_at))
+    .map((m) => ({ ...m, author: people.find((x) => x.id === m.profile_id) }));
+}
+
 /** Leadership only. There is deliberately no co-host-facing query for these. */
 export async function listPrayers(): Promise<(PrayerRequest & { author?: Profile })[]> {
   const people = await listMembers();
@@ -719,7 +1032,7 @@ type RecordingModel = {
   topic?: string | null; questionsCovered?: string | null; description?: string | null;
   scheduledAt: string; durationMinutes?: number | null; joinUrl?: string | null;
   publishedAt?: string | null; announceAt?: string | null; announcedAt?: string | null;
-  source?: string | null; calendlyEventId?: string | null;
+  source?: string | null; calendlyEventId?: string | null; cancelledAt?: string | null;
 };
 
 function fromRecordingModel(r: RecordingModel): Recording {
@@ -732,6 +1045,7 @@ function fromRecordingModel(r: RecordingModel): Recording {
     announced_at: r.announcedAt ?? null,
     source: (r.source ?? 'manual') as Recording['source'],
     calendly_event_id: r.calendlyEventId ?? null,
+    cancelled_at: r.cancelledAt ?? null,
   };
 }
 
@@ -741,7 +1055,7 @@ type SessionViewShape = {
   durationMinutes?: number | null; joinUrl?: string | null;
   guestName?: string | null; guestBlurb?: string | null; guestUrl?: string | null;
   guestReturning?: boolean | null; attendeeCount?: number | null;
-  yourQuestion?: string | null;
+  yourQuestion?: string | null; cancelledAt?: string | null;
 };
 
 /**
@@ -758,5 +1072,7 @@ function fromSessionView(v: SessionViewShape | null | undefined): Recording {
     join_url: v?.joinUrl ?? null,
     published_at: 'published', announce_at: null, announced_at: null,
     source: 'manual', calendly_event_id: null,
+    // Called off is not gone: the co-host screen says so instead of loading forever.
+    cancelled_at: v?.cancelledAt ?? null,
   };
 }

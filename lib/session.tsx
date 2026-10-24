@@ -90,10 +90,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setProfile(p);
       });
     },
+    // Clear our own state FIRST, then sign Amplify out and let any failure
+    // reach the caller instead of swallowing it — a sign-out that did not
+    // happen should not look like one that did.
     signOut: async () => {
-      if (!DEMO_MODE) { try { await amplifySignOut(); } catch { /* already out */ } }
       setProfile(null);
       setNoProfile(false);
+      if (!DEMO_MODE) await amplifySignOut();
     },
     setTimezone: async (tz) => {
       if (!profile) return;

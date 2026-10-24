@@ -4,6 +4,7 @@ import {
   Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule,
 } from '@/components/ui';
 import { space, color } from '@/lib/theme';
+import { SUPPORT_EMAIL } from '@/lib/ministry';
 import { onLoadError } from '@/lib/loadError';
 
 const open = (url: string) => { Linking.openURL(url).catch(onLoadError); };
@@ -29,7 +30,7 @@ export default function Privacy() {
       <Tiny onPress={() => router.replace('/(public)/listen')} style={{ marginBottom: space.sm }}>
         ← Back to the podcast
       </Tiny>
-      <Eyebrow>Last updated 15 September 2026</Eyebrow>
+      <Eyebrow>Last updated 26 September 2026</Eyebrow>
       <Display style={{ fontSize: 30, lineHeight: 34 }}>Privacy</Display>
       <Rule style={{ marginVertical: space.md }} />
 
@@ -37,7 +38,9 @@ export default function Privacy() {
         <Eyebrow>The short version</Eyebrow>
         <Body>
           If you are here to listen, we collect nothing about you at all — no account,
-          no analytics, no advertising, no tracking. Only invited co-hosts have
+          no analytics, no advertising, no tracking. The only thing the app ever asks a
+          listener for is contact details, and only if you choose to tell us you are
+          interested in a future cohort. Beyond that, only invited co-hosts have
           accounts, and what we hold for them is listed below.
         </Body>
       </Card>
@@ -46,9 +49,58 @@ export default function Privacy() {
       <Body style={{ marginTop: 6 }}>
         The episode list is public information from our YouTube channel. The app does
         not create an identifier for you, does not track you across apps or websites,
-        and contains no advertising or analytics software of any kind. Tapping an
-        episode opens YouTube, and from that point YouTube's own privacy policy
-        applies.
+        and contains no advertising or analytics software of any kind.
+      </Body>
+
+      {/* Build 8: episodes play in the app now, so this is no longer "tapping opens YouTube". */}
+      <H3 style={{ marginTop: space.lg }}>When you play an episode</H3>
+      <Body style={{ marginTop: 6 }}>
+        Episodes play inside the app using YouTube's own embedded player, because the
+        episodes live on YouTube and their terms allow no other player. That player is
+        YouTube's software running inside a window here, so while an episode is playing
+        YouTube can see what a visit to youtube.com would show them — and from that point
+        their privacy policy applies, not ours. We are not told what you played, and we
+        receive nothing back from it.
+      </Body>
+
+      {/* lib/library.tsx: on the device only. A new phone starts empty, and we say so. */}
+      <H3 style={{ marginTop: space.lg }}>What the app remembers for you</H3>
+      <Body style={{ marginTop: 6 }}>
+        The app keeps the episodes you save, the ones you have finished and how far into
+        each one you got. All of it is stored on your phone and nowhere else. It is never
+        sent to us, we have no way to read it, and no account is involved — which also
+        means it does not follow you to a new phone, and deleting the app deletes it.
+      </Body>
+
+      {/* Build 18: listeners can opt in to new-episode announcements, stored against no profile. */}
+      <H3 style={{ marginTop: space.lg }}>If you turn on episode notifications</H3>
+      <Body style={{ marginTop: 6 }}>
+        You can ask to be told when a new episode goes up without having an account. If
+        you do, we store one thing: a notification token issued by Apple for that phone.
+        It is not linked to a name, an email address or anything else, it is used for
+        nothing but sending you that announcement, and switching notifications off in
+        the app deletes it.
+      </Body>
+
+      {/* Build 15: the interest form (lib/interest.ts, Inquiry model). Two-year retention. */}
+      <H3 style={{ marginTop: space.lg }}>If you ask about a future cohort</H3>
+      <Body style={{ marginTop: 6 }}>
+        The About screen and the co-host sign-in both offer a way to tell us you would
+        like to be part of a future cohort. If you use it, we receive your name, your
+        email address, a phone number if you chose to give one, and anything you wrote.
+        The phone number is optional and nothing is worse for leaving it out.
+      </Body>
+      <Body style={{ marginTop: space.sm }}>
+        It is used for one thing: so Janell or someone on the team can get back to you
+        about a cohort. It is not added to a mailing list, not used for advertising, not
+        shared with anyone outside the ministry, and not sold to anybody, ever. No account
+        is created for you and nothing else in the app changes.
+      </Body>
+      <Body style={{ marginTop: space.sm }}>
+        We keep it for up to two years, because cohorts are invited a season at a time
+        and the next one may not be the right one. After that it is deleted. You can ask
+        us to delete it sooner at any point, for any reason or none, by emailing the
+        address at the bottom of this page — and we will, without asking you why.
       </Body>
 
       <H3 style={{ marginTop: space.lg }}>If you are a co-host</H3>
@@ -63,6 +115,7 @@ export default function Privacy() {
         ['Questions you submit', 'the ones that shape the season, and any you ask for a session you cannot attend'],
         ['Prayer requests you send', 'in your own words'],
         ['Which messages you have opened', 'so leadership knows whether an announcement reached people'],
+        ['A notification token for your phone', 'only if you turn notifications on — it is what lets us reach your lock screen, and turning them off deletes it'],
       ].map(([what, why]) => (
         <Small key={what} style={{ marginTop: 8 }}>
           <Small style={{ color: color.ink }}>{what}</Small> — {why}
@@ -98,6 +151,13 @@ export default function Privacy() {
         On Amazon Web Services in the United States, in an account controlled by the
         ministry. Data is encrypted in transit and at rest.
       </Body>
+      <Body style={{ marginTop: 10 }}>
+        One exception, and it is the only time anything leaves that account: sending a
+        notification means handing your phone's notification token, the title and the
+        line of text to Expo, who pass it to Apple. Nothing else goes with it — not your
+        name, not your email, and never the contents of a prayer request. If you have
+        notifications switched off, this never happens at all.
+      </Body>
 
       <H3 style={{ marginTop: space.lg }}>Deleting it</H3>
       <Body style={{ marginTop: 6 }}>
@@ -114,8 +174,10 @@ export default function Privacy() {
 
       <H3 style={{ marginTop: space.lg }}>Children</H3>
       <Body style={{ marginTop: 6 }}>
-        The podcast is made for adults and co-hosts are adults. The app is not directed
-        at children and we do not knowingly collect information from anyone under 13.
+        The podcast and the app are made for adults and for young women in their late
+        teens. They are not directed at children, the app never asks anyone's age, and
+        we do not knowingly collect information from anyone under 13. If you believe a
+        child under 13 has sent us something, email us and we will delete it.
       </Body>
 
       <H3 style={{ marginTop: space.lg }}>Asking us</H3>
@@ -123,10 +185,10 @@ export default function Privacy() {
         For a copy of what we hold, a correction, or anything else:
       </Body>
       <Tiny
-        onPress={() => open('mailto:hello@findingsomethingreal.com?subject=Privacy')}
+        onPress={() => open(`mailto:${SUPPORT_EMAIL}?subject=Privacy`)}
         style={{ marginTop: 10, textDecorationLine: 'underline', color: color.ink }}
       >
-        hello@findingsomethingreal.com
+        {SUPPORT_EMAIL}
       </Tiny>
 
       <Small style={{ textAlign: 'center', marginTop: space.xxl, color: color.faint }}>

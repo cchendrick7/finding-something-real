@@ -4,6 +4,7 @@ import {
   Screen, Display, Body, Small, Tiny, Card, Eyebrow, Rule,
 } from '@/components/ui';
 import { space, color } from '@/lib/theme';
+import { SUPPORT_EMAIL } from '@/lib/ministry';
 import { onLoadError } from '@/lib/loadError';
 
 const open = (url: string) => { Linking.openURL(url).catch(onLoadError); };
@@ -53,10 +54,10 @@ export default function DeleteRequest() {
           removed within 30 days, and usually the same week.
         </Small>
         <Tiny
-          onPress={() => open('mailto:hello@findingsomethingreal.com?subject=Delete%20my%20account')}
+          onPress={() => open(`mailto:${SUPPORT_EMAIL}?subject=Delete%20my%20account`)}
           style={{ marginTop: 10, textDecorationLine: 'underline', color: color.ink }}
         >
-          hello@findingsomethingreal.com
+          {SUPPORT_EMAIL}
         </Tiny>
       </Card>
 
@@ -68,6 +69,7 @@ export default function DeleteRequest() {
         'Your prayer requests',
         'Questions you submitted',
         'Which notes you have opened',
+        'Your devices, and every notification sent to them',
       ].map((t) => <Small key={t} style={{ marginTop: 5 }}>· {t}</Small>)}
 
       <Eyebrow style={{ marginTop: space.lg }}>What is kept</Eyebrow>

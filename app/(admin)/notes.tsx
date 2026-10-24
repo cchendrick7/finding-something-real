@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSession } from '@/lib/session';
 import { createNote, listAllNotes, listMembers, readStats, renderNoteBody } from '@/lib/data';
 import { Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button, Field, Wrap } from '@/components/ui';
@@ -17,10 +17,12 @@ const AUDIENCES: { id: NoteAudience; label: string }[] = [
 
 export default function Notes() {
   const { profile } = useSession();
+  // ?to=<profile id> opens the composer already addressed to one co-host.
+  const { to } = useLocalSearchParams<{ to?: string }>();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [audience, setAudience] = useState<NoteAudience>('all');
-  const [picked, setPicked] = useState<string[]>([]);
+  const [audience, setAudience] = useState<NoteAudience>(to ? 'custom' : 'all');
+  const [picked, setPicked] = useState<string[]>(to ? [to] : []);
   const [members, setMembers] = useState<Profile[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [sentMsg, setSentMsg] = useState<string | null>(null);

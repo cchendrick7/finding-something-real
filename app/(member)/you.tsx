@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
+import { onLoadError } from '@/lib/loadError';
 import { COMMON_ZONES } from '@/lib/tz';
-import { Screen, Display, H3, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button, Wrap } from '@/components/ui';
+import { Screen, Display, H3, Small, Tiny, Card, Eyebrow, Rule, Row, Button, Wrap } from '@/components/ui';
+import { NotificationSettings } from '@/components/notifications';
 import { space, color } from '@/lib/theme';
 
 export default function You() {
@@ -22,6 +24,14 @@ export default function You() {
         <Eyebrow>This week</Eyebrow>
         <H3 style={{ marginBottom: 4 }}>Anything we can pray for?</H3>
         <Small>Goes only to Janell and the team →</Small>
+      </Card>
+
+      {/* A Message, beside prayer requests rather than a kind of one: pastorally
+          different. Goes to leadership only, and deliberately one way. */}
+      <Card testID="open-reach-out" onPress={() => router.push('/(member)/reach-out')}>
+        <Eyebrow>Anything else</Eyebrow>
+        <H3 style={{ marginBottom: 4 }}>Reach out to us</H3>
+        <Small>Send us a note here →</Small>
       </Card>
 
       <Card onPress={() => router.push('/(member)/note')}>
@@ -62,30 +72,22 @@ export default function You() {
         <Tiny>Every time in the app is shown in this zone.</Tiny>
       </Card>
 
-      <Card>
-        <Eyebrow>Notifications</Eyebrow>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Small>Push notifications</Small><Pill label="On" tone="ink" />
-        </Row>
-        <Rule style={{ marginVertical: space.md }} />
-        <Tiny>
-          Quiet hours 9pm–8am your time for general messages. Reminders before a recording
-          always come through. Janell and Lauren can see when you open a message.
-        </Tiny>
-      </Card>
+      <NotificationSettings />
 
       {isAdmin ? (
         <Button label="Open admin portal" variant="outline" onPress={() => router.replace('/(admin)/overview')} />
       ) : null}
       <View style={{ height: 10 }} />
       {/* outline, not quiet: this is the only way out of the app, and at `quiet`
-          it read as a footnote. signOut is awaited — navigating first left the
-          Cognito session half-cleared. */}
+          it read as a footnote. signOut clears the session state and then
+          rethrows if Amplify failed; leave for the start screen either way. */}
       <Button
         testID="signout"
         label="Sign out"
         variant="outline"
-        onPress={async () => { await signOut(); router.replace('/'); }}
+        onPress={() => {
+          signOut().catch(onLoadError).finally(() => router.replace('/'));
+        }}
       />
       {/* Was underlined text with no handler — it promised something the app
           could not do, which is a Guideline 2.1 problem on its own. */}

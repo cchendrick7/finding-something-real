@@ -1,8 +1,10 @@
 import React from 'react';
 import {
-  View, Text, Pressable, StyleSheet, ScrollView, ViewStyle, TextStyle, TextInput,
+  View, Text, Pressable, StyleSheet, ScrollView, ViewStyle, TextStyle, TextInput, Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { color, type, space, radius } from '@/lib/theme';
+import { safeLeading } from '@/lib/type-metrics';
 
 /** Text props shared by every typographic helper. Press support matters:
  *  several inline affordances ("Change", "← Back") are text, not buttons. */
@@ -12,17 +14,29 @@ interface TextProps {
   onPress?: () => void;
   testID?: string;
   numberOfLines?: number;
+  selectable?: boolean;
+  accessibilityLabel?: string;
 }
 
 const make = (base: TextStyle) =>
-  function Txt({ children, style, onPress, testID, numberOfLines }: TextProps) {
+  function Txt({
+    children, style, onPress, testID, numberOfLines, selectable, accessibilityLabel,
+  }: TextProps) {
+    // Flatten so the lineHeight can be checked against the fontSize that will
+    // actually be used: a style that overrides fontSize keeps the lineHeight
+    // it inherited, and iOS crops to it (see lib/type-metrics.ts).
+    const flat = StyleSheet.flatten([base, style]);
+    const leading = safeLeading(flat.fontSize, flat.lineHeight);
+    const final = leading === flat.lineHeight ? flat : { ...flat, lineHeight: leading };
     return (
       <Text
         testID={testID}
         onPress={onPress}
         numberOfLines={numberOfLines}
+        selectable={selectable}
+        accessibilityLabel={accessibilityLabel}
         accessibilityRole={onPress ? 'button' : undefined}
-        style={[base, style]}
+        style={final}
       >
         {children}
       </Text>
@@ -36,6 +50,11 @@ export const H3 = make(type.h3 as TextStyle);
 export const Body = make(type.body as TextStyle);
 export const Small = make(type.small as TextStyle);
 export const Tiny = make(type.xs as TextStyle);
+
+/** Bold inside running text — e.g. the acrostic in About. */
+export const Strong = ({ children }: { children: React.ReactNode }) => (
+  <Text style={{ fontWeight: '600' }}>{children}</Text>
+);
 
 export const Eyebrow = ({ children, tone, style }: {
   children: React.ReactNode; tone?: string; style?: TextStyle;
@@ -126,16 +145,62 @@ export function Pill({
   );
 }
 
+export function Toggle({
+  label, hint, value, onChange, disabled, testID,
+}: {
+  label: string; hint?: string; value: boolean; onChange: (v: boolean) => void;
+  disabled?: boolean; testID?: string;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityHint={hint}
+      accessibilityState={{ checked: value, disabled: Boolean(disabled) }}
+      disabled={disabled}
+      onPress={disabled ? undefined : () => onChange(!value)}
+      style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingVertical: 10, gap: space.md, opacity: disabled ? 0.4 : 1,
+      }}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={type.small}>{label}</Text>
+        {hint ? <Text style={[type.xs, { marginTop: 2 }]}>{hint}</Text> : null}
+      </View>
+      <View
+        style={{
+          width: 46, height: 28, borderRadius: 999, padding: 3,
+          backgroundColor: value ? color.ink : color.wash,
+          borderWidth: 1, borderColor: value ? color.ink : color.line,
+          alignItems: value ? 'flex-end' : 'flex-start',
+        }}
+      >
+        <View
+          style={{
+            width: 20, height: 20, borderRadius: 999,
+            backgroundColor: value ? color.white : color.faint,
+          }}
+        />
+      </View>
+    </Pressable>
+  );
+}
+
 export function Field({
   label, value, onChangeText, placeholder, multiline, hint, testID, editable = true,
-  secure, autoCapitalize, keyboardType,
+  secure, autoCapitalize, keyboardType, error,
 }: {
   label?: string; value: string; onChangeText?: (v: string) => void;
   placeholder?: string; multiline?: boolean; hint?: string; testID?: string; editable?: boolean;
   secure?: boolean;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-  keyboardType?: 'default' | 'email-address' | 'numeric';
+  keyboardType?: 'default' | 'email-address' | 'numeric' | 'phone-pad';
+  /** Shown in place of the hint, in red, with the field outlined. */
+  error?: string;
 }) {
+  const [focused, setFocused] = React.useState(false);
   return (
     <View style={{ marginBottom: space.md }}>
       {label ? <Text style={[type.eyebrow, { marginBottom: 6 }]}>{label}</Text> : null}
@@ -150,20 +215,58 @@ export function Field({
         secureTextEntry={secure}
         autoCapitalize={autoCapitalize}
         keyboardType={keyboardType}
-        style={[s.input, multiline && { minHeight: 110, textAlignVertical: 'top', paddingTop: 12 }]}
+        // A single-line field closes the keyboard on return; a multiline one
+        // needs return for new lines, so it gets its own "Done" below.
+        returnKeyType={multiline ? undefined : 'done'}
+        submitBehavior={multiline ? 'newline' : 'blurAndSubmit'}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={[
+          s.input,
+          multiline && { minHeight: 110, textAlignVertical: 'top', paddingTop: 12 },
+          error ? { borderColor: color.danger } : null,
+        ]}
       />
-      {hint ? <Tiny style={{ marginTop: 6 }}>{hint}</Tiny> : null}
+      {multiline && focused ? (
+        <Text
+          testID={testID ? `${testID}-done` : undefined}
+          accessibilityRole="button"
+          accessibilityLabel="Close the keyboard"
+          onPress={() => Keyboard.dismiss()}
+          style={[type.xs, {
+            alignSelf: 'flex-end', marginTop: 6, color: color.blue,
+            paddingVertical: 6, paddingHorizontal: 10,
+          }]}
+        >
+          Done
+        </Text>
+      ) : null}
+      {error ? (
+        <Tiny testID={testID ? `${testID}-error` : undefined} style={{ marginTop: 6, color: color.danger }}>
+          {error}
+        </Tiny>
+      ) : hint ? <Tiny style={{ marginTop: 6 }}>{hint}</Tiny> : null}
     </View>
   );
 }
 
 export function Screen({ children, pad = true }: { children: React.ReactNode; pad?: boolean }) {
+  // The device top inset, so the first line is not jammed under the status
+  // bar (it was, in the store screenshots).
+  const insets = useSafeAreaInsets();
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: color.paper }}
+      // Keep the focused field above the keyboard, let a drag put the
+      // keyboard away, and let a tap on a button land while it is up.
+      automaticallyAdjustKeyboardInsets
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={[
         { paddingBottom: 60, maxWidth: 720, width: '100%', alignSelf: 'center' },
-        pad && { paddingHorizontal: space.xl, paddingTop: space.lg },
+        pad
+          ? { paddingHorizontal: space.xl, paddingTop: space.lg + insets.top }
+          : { paddingTop: insets.top },
       ]}
     >
       {children}

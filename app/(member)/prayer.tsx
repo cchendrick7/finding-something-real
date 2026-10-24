@@ -16,9 +16,9 @@ export default function Prayer() {
     return (
       <Screen>
         <Eyebrow>Received</Eyebrow>
-        <H1>Thank you for telling us.</H1>
+        <H1>Thank you for trusting us with this.</H1>
         <Rule />
-        <Body style={{ marginBottom: space.lg }}>We're praying this week.</Body>
+        <Body style={{ marginBottom: space.lg }}>We'll be praying for you and what you've shared this week.</Body>
         <Button label="Back to home" variant="outline" onPress={() => router.replace('/(member)/home')} />
       </Screen>
     );
@@ -37,7 +37,7 @@ export default function Prayer() {
       <Button testID="prayer-send" label="Send" disabled={!body.trim()}
               onPress={async () => { await submitPrayer(profile.id, body.trim()); setDone(true); }} />
       <Tiny style={{ textAlign: 'center', marginTop: space.md }}>
-        You can skip this. It comes around again next week.
+        We'd love to pray for you. Feel free to come back here and share at any time.
       </Tiny>
     </Screen>
   );

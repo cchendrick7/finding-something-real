@@ -39,6 +39,8 @@ export default function PublicLayout() {
       <Tabs.Screen name="delete-request" options={{ href: null }} />
       {/* The privacy policy URL both stores require before submission. */}
       <Tabs.Screen name="privacy" options={{ href: null }} />
+      {/* The interest form (build 15). Opened from About and Co-hosts, not a tab. */}
+      <Tabs.Screen name="interest" options={{ href: null }} />
     </Tabs>
   );
 }
