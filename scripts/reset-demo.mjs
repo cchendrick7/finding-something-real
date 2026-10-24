@@ -9,6 +9,8 @@
  *   node scripts/reset-demo.mjs
  */
 import { PEOPLE, token, gql } from './seed.mjs';
+import { refuseProduction } from './target.mjs';
+refuseProduction('resetting the demo data');
 
 const lead = await token(PEOPLE.find((p) => p.name === 'Curtis'));
 const log = (m, r) => console.log(m.padEnd(46), r?.errors ? JSON.stringify(r.errors[0]?.message) : 'ok');

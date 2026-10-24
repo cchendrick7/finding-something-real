@@ -13,7 +13,10 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const outputs = JSON.parse(readFileSync(new URL('../amplify_outputs.json', import.meta.url)));
+// Test backend unless FSR_TARGET=production — see scripts/target.mjs.
+import { outputs, announce, refuseProduction } from './target.mjs';
+announce('seed');
+refuseProduction('seeding test people and a demo season');
 const REGION = outputs.auth.aws_region;
 const POOL = outputs.auth.user_pool_id;
 const CLIENT = outputs.auth.user_pool_client_id;

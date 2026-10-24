@@ -20,7 +20,9 @@ import {
 import { readFileSync } from 'node:fs';
 import { PEOPLE, token, gql } from './seed.mjs';
 
-const outputs = JSON.parse(readFileSync(new URL('../amplify_outputs.json', import.meta.url)));
+// Test backend unless FSR_TARGET=production — see scripts/target.mjs.
+import { outputs, announce, refuseProduction } from './target.mjs';
+announce('deletion-test');
 const POOL = outputs.auth.user_pool_id;
 const CLIENT = outputs.auth.user_pool_client_id;
 const cog = new CognitoIdentityProviderClient({ region: outputs.auth.aws_region });

@@ -23,7 +23,9 @@ import { SignatureV4 } from '@smithy/signature-v4';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { HttpRequest } from '@smithy/protocol-http';
 
-const outputs = JSON.parse(readFileSync(new URL('../amplify_outputs.json', import.meta.url)));
+// Test backend unless FSR_TARGET=production — see scripts/target.mjs.
+import { outputs, announce, refuseProduction } from './target.mjs';
+announce('guest-test');
 const REGION = outputs.auth.aws_region;
 const POOL = outputs.auth.identity_pool_id;
 const GQL = new URL(outputs.data.url);

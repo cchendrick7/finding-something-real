@@ -73,8 +73,8 @@ Themes*; everything else None.
 > sign-up, by design. A demo co-host account is below so you can see what is
 > behind it.
 >
-> Demo co-host: `imani@fsr.test` / `FsrHost!2026aA`
-> Demo leadership: `curtis@fsr.test` / `FsrLead!2026aA`
+> Demo co-host: `testcohost@fsr.test` / *(password pasted into App Store
+> Connect — not kept in this file; see "Test accounts" below)*
 >
 > Account deletion is in the app at You → "Delete my account and data", and
 > also at <https://HOST/(public)/delete-request> for anyone who has
@@ -155,3 +155,29 @@ screenshots are required. Reasoning in `docs/APP-STORE-DECISIONS.md`.
   days before they can publish, and organizations are exempt.
 - A real support page or inbox behind `hello@findingsomethingreal.com`. Apple
   checks that the support URL resolves.
+
+---
+
+## Test accounts in production (since 3 Oct 2026)
+
+The seeded test people live only in the test backend (`scripts/target.mjs`).
+Two test sign-ins stay in production on purpose, managed by
+`scripts/ensure-test-accounts.mjs`:
+
+| Account | What it is |
+|---|---|
+| `testcohost@fsr.test` | Ordinary co-host: group `cohost`, active, in the current season. The App Review account. Real co-hosts see it in a roster if it RSVPs. |
+| `stranger@fsr.test` | No group, pending profile — what a self sign-up looks like. Must see nothing. |
+
+Passwords are permanent, printed once by `--reset`, and stored nowhere in this
+repository. Lost one? `FSR_TARGET=production node scripts/ensure-test-accounts.mjs --reset`
+issues new ones for both — then update App Store Connect (App Review notes and
+the TestFlight beta review sign-in) and the Play Console app-access section.
+
+Leadership: Janell, Curtis (`cchendrick7@gmail.com`) and Lauren
+(`lauren@findingsomethingreal.com`), created with `scripts/make-leader.mjs`.
+
+> This file is the 15 Sep version plus this section; the App Store record it
+> describes moved on (build 17 approved; EU trader status pending in App Store
+> Connect → Business). Treat App Store Connect as the source of truth.
+

@@ -13,6 +13,11 @@ const BRANCH = 'main';
  * Amplify's documented SPA rewrite: any path with no real file extension is
  * rewritten to index.html with a **200**.
  *
+ * `html` is in the pass-through list on purpose (build 10): public/player.html
+ * is the page the in-app player loads. Without it this rule answers that URL
+ * with the React app — status 200, so nothing looks wrong — and every episode
+ * fails to play with no clue why.
+ *
  * Not `404-200`. That variant serves the right HTML but with a 404 status, and
  * combined with Amplify's trailing-slash redirect a deep link ended up as
  * 301 → 404. Expo Router's group segments — /(member)/home — are exactly the
@@ -21,7 +26,7 @@ const BRANCH = 'main';
  */
 const SPA_RULES = [
   {
-    source: '</^[^.]+$|\\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|webmanifest)$)([^.]+$)/>',
+    source: '</^[^.]+$|\\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|webmanifest|html)$)([^.]+$)/>',
     target: '/index.html',
     status: '200',
   },
