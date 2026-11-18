@@ -9,7 +9,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.findingsomethingreal.app",
-      "buildNumber": "21",
+      "buildNumber": "22",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "https",
@@ -24,7 +24,7 @@
     "android": {
       "package": "com.findingsomethingreal.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
