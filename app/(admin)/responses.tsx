@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
-import { View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { listRecordings, rsvpRoster, listQuestions, type PushReach } from '@/lib/data';
+import { listRecordings, rsvpRoster, rsvpCounts, listQuestions, type PushReach } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr } from '@/lib/tz';
 import { Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row } from '@/components/ui';
 import { space, color } from '@/lib/theme';
@@ -15,28 +15,87 @@ type RosterRow = {
 };
 
 /**
- * The session this screen is about: the next one coming up, or — when none is
- * scheduled — the most recent. (It used to take the first published session in
- * date order, which after the first week was always one in the past.)
+ * Every session leadership can ask about, in the order they matter: upcoming
+ * soonest first, then past ones most recent first. The screen opens on the
+ * first — the next session, or the latest if none is scheduled.
+ *
+ * Until 9 Nov 2026 the screen showed one session only, with no way to see
+ * the replies to any other (Lauren: "how do we know which ones they can and
+ * can't attend?").
  */
-function pick(recs: Recording[]): Recording | null {
+function order(recs: Recording[]): { upcoming: Recording[]; past: Recording[] } {
   const published = recs.filter((r) => r.published_at && !r.cancelled_at);
   const now = Date.now();
-  return published.find((r) => Date.parse(r.scheduled_at) > now) ?? published[published.length - 1] ?? null;
+  return {
+    upcoming: published.filter((r) => Date.parse(r.scheduled_at) > now),
+    past: published.filter((r) => Date.parse(r.scheduled_at) <= now).reverse(),
+  };
+}
+
+type Counts = Map<string, { yes: number; no: number }>;
+
+/** One session in the picker: its date, and where the replies stand. */
+function SessionChip({ rec, counts, selected, tz, onPress }: {
+  rec: Recording; counts: Counts; selected: boolean; tz: string; onPress: () => void;
+}) {
+  const c = counts.get(rec.id) ?? { yes: 0, no: 0 };
+  const fg = selected ? color.white : color.ink;
+  return (
+    <Pressable
+      testID={`session-${rec.id}`}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${rec.title}, ${formatDate(rec.scheduled_at, tz)}: ${c.yes} yes, ${c.no} can't make it`}
+      onPress={onPress}
+      style={{
+        paddingVertical: 10, paddingHorizontal: 14, marginRight: 8, borderRadius: 14,
+        borderWidth: 1, borderColor: selected ? color.ink : color.line,
+        backgroundColor: selected ? color.ink : color.card, maxWidth: 190,
+      }}
+    >
+      <Text style={{ fontSize: 13, fontWeight: '600', color: fg }}>{formatDate(rec.scheduled_at, tz)}</Text>
+      <Text numberOfLines={1} style={{ fontSize: 12, color: selected ? color.white : color.muted, marginTop: 2 }}>
+        {rec.title}
+      </Text>
+      <Text style={{ fontSize: 12, marginTop: 4, color: selected ? color.white : c.yes ? color.sage : color.faint }}>
+        {c.yes} yes · {c.no} can't
+      </Text>
+    </Pressable>
+  );
 }
 
 export default function Responses() {
   const { profile } = useSession();
   const [rec, setRec] = useState<Recording | null>(null);
+  const [sessions, setSessions] = useState<{ upcoming: Recording[]; past: Recording[] }>({ upcoming: [], past: [] });
+  const [counts, setCounts] = useState<Counts>(new Map());
   const [roster, setRoster] = useState<RosterRow[]>([]);
   const [qs, setQs] = useState<(Question & { author?: Profile })[]>([]);
+  const shownId = useRef<string | null>(null);
+
+  const show = useCallback(async (r: Recording | null) => {
+    shownId.current = r?.id ?? null;
+    setRec(r);
+    setRoster([]);
+    if (r) {
+      const rows = await rsvpRoster(r.id);
+      // Who is coming first, then who can't, then who hasn't answered.
+      const rank = (x: RosterRow) => (x.response === 'yes' ? 0 : x.response === 'no' ? 1 : 2);
+      rows.sort((x, y) => rank(x) - rank(y) || x.member.display_name.localeCompare(y.member.display_name));
+      // A slower answer for a session that is no longer selected is dropped.
+      if (shownId.current === r.id) setRoster(rows);
+    }
+  }, []);
 
   useFocusEffect(useCallback(() => {
     (async () => {
-      const recs = await listRecordings(true);
-      const next = pick(recs);
-      setRec(next);
-      if (next) setRoster(await rsvpRoster(next.id));
+      const ordered = order(await listRecordings(true));
+      setSessions(ordered);
+      setCounts(await rsvpCounts());
+      // Coming back to the screen keeps the session that was being looked at.
+      const all = [...ordered.upcoming, ...ordered.past];
+      const keep = all.find((r) => r.id === shownId.current) ?? all[0] ?? null;
+      await show(keep);
       setQs(await listQuestions());
     })().catch(onLoadError);
   }, []));
@@ -48,6 +107,22 @@ export default function Responses() {
     <Screen>
       <Eyebrow>Notified · responded</Eyebrow>
       <Display>Responses</Display>
+      {sessions.upcoming.length + sessions.past.length > 1 ? (
+        <View style={{ marginTop: space.md }}>
+          {([['Coming up', sessions.upcoming], ['Past', sessions.past]] as const).map(([label, list]) =>
+            list.length ? (
+              <View key={label} style={{ marginBottom: 10 }}>
+                <Tiny style={{ marginBottom: 6 }}>{label}</Tiny>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {list.map((r) => (
+                    <SessionChip key={r.id} rec={r} counts={counts} tz={tz} selected={r.id === rec?.id}
+                      onPress={() => { show(r).catch(onLoadError); }} />
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null)}
+        </View>
+      ) : null}
       {rec ? (
         <Small style={{ marginTop: 4 }}>
           {rec.title} — {formatDate(rec.scheduled_at, tz)} {formatTime(rec.scheduled_at, tz)} {zoneAbbr(rec.scheduled_at, tz)}

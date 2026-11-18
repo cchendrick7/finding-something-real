@@ -761,6 +761,28 @@ export async function rsvpRoster(recordingId: string) {
   });
 }
 
+/**
+ * Yes / can't-make-it counts for every session at once, current co-hosts only —
+ * for the session picker on Responses, so leaders can see where each one
+ * stands without opening it.
+ */
+export async function rsvpCounts(): Promise<Map<string, { yes: number; no: number }>> {
+  const ids = new Set((await listCohosts()).map((m) => m.id));
+  const rows: { recording_id: string; profile_id: string; response: string }[] = DEMO_MODE
+    ? db.rsvps
+    : (await listAll(client.models.Rsvp.list, {})).map((r) => ({
+        recording_id: r.recordingId, profile_id: r.profileId, response: r.response ?? 'no',
+      }));
+  const out = new Map<string, { yes: number; no: number }>();
+  for (const r of rows) {
+    if (!ids.has(r.profile_id)) continue;
+    const c = out.get(r.recording_id) ?? { yes: 0, no: 0 };
+    if (r.response === 'yes') c.yes += 1; else c.no += 1;
+    out.set(r.recording_id, c);
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------- notes */
 
 export async function listNotesFor(me: string): Promise<Note[]> {
