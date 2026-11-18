@@ -306,13 +306,28 @@ export async function setCohostActive(profileId: string, active: boolean): Promi
  * when a device moves from listener to member; a co-host who switched one off
  * keeps her choice. Failure is false, never a throw.
  */
+/**
+ * Did push-api accept the registration? It answers { ok: false, error } as
+ * DATA, not as a GraphQL error, so checking r.errors alone reported refusals
+ * (no_profile, invalid_token) as success and the phone silently stayed
+ * unregistered. A JSON field may arrive as a string or already parsed.
+ * Anything other than an explicit ok: false still counts as accepted, so an
+ * unexpected shape cannot turn working registrations into failures.
+ */
+function accepted(r: { data?: unknown; errors?: unknown[] | null }): boolean {
+  if (r.errors?.length) return false;
+  let d = r.data;
+  if (typeof d === 'string') { try { d = JSON.parse(d); } catch { return true; } }
+  return !(d && typeof d === 'object' && (d as { ok?: unknown }).ok === false);
+}
+
 export async function registerMemberPushToken(
   token: string, platform: string, deviceLabel?: string | null,
 ): Promise<boolean> {
   if (DEMO_MODE) return true;
   try {
     const r = await client.mutations.registerPushToken({ token, platform, deviceLabel });
-    return !r.errors?.length;
+    return accepted(r);
   } catch {
     return false;
   }
@@ -329,7 +344,7 @@ export async function registerListenerPushToken(token: string, platform: string)
       { token, platform },
       { authMode: 'identityPool' },
     );
-    return !r.errors?.length;
+    return accepted(r);
   } catch {
     return false;
   }

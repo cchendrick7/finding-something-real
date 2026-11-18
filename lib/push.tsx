@@ -46,9 +46,21 @@ export type PushPrefs = {
   wantsEpisodes: boolean;
 };
 
+/**
+ * Notifications are allowed, but this phone could not be connected:
+ * 'no_token' — Apple or Google did not give the app a push token;
+ * 'not_saved' — the token was not accepted by the server.
+ * Until 18 Nov 2026 both failed silently: the phone showed notifications as on
+ * and simply never received anything (Ava, iPhone, Nov 2026).
+ */
+export type PushProblem = { kind: 'no_token' | 'not_saved'; detail: string } | null;
+
 type PushContextValue = {
   status: PushStatus;
   prefs: PushPrefs;
+  problem: PushProblem;
+  /** Try to connect this phone again after a problem. */
+  retry: () => Promise<boolean>;
   /**
    * Ask for permission (only from a button that says why) and register this
    * phone. `want` is what the button offered, switched on explicitly — the
@@ -76,6 +88,8 @@ const DEFAULT_PREFS: PushPrefs = { wantsSessions: true, wantsReminders: true, wa
 const PushContext = createContext<PushContextValue>({
   status: 'loading',
   prefs: DEFAULT_PREFS,
+  problem: null,
+  retry: async () => false,
   enable: async () => false,
   disable: async () => {},
   setPref: async () => {},
@@ -139,6 +153,8 @@ export function PushProvider({ children }: { children: ReactNode }) {
   const { profile, loading: sessionLoading } = useSession();
   const [status, setStatus] = useState<PushStatus>('loading');
   const [prefs, setPrefs] = useState<PushPrefs>(DEFAULT_PREFS);
+  const [problem, setProblem] = useState<PushProblem>(null);
+  const lastError = useRef('');
   const tokenRef = useRef<string | null>(null);
   // Who this phone's token is registered for: a profile id, '' for a listener,
   // null for not registered. Stops a re-render from registering again.
@@ -152,6 +168,7 @@ export function PushProvider({ children }: { children: ReactNode }) {
       tokenRef.current = token.data;
       return token.data;
     } catch (e) {
+      lastError.current = e instanceof Error ? e.message : String(e);
       console.log('push: could not get a token', e);
       return null;
     }
@@ -161,8 +178,12 @@ export function PushProvider({ children }: { children: ReactNode }) {
   // then read back the switches the server holds for it.
   const register = useCallback(
     async (memberId: string | null) => {
+      lastError.current = '';
       const token = await getToken();
-      if (!token) return false;
+      if (!token) {
+        setProblem({ kind: 'no_token', detail: lastError.current || (PROJECT_ID ? 'no token' : 'no project id') });
+        return false;
+      }
       // The device's name and model, so one person's phones can be told apart.
       const label = [Device.deviceName, Device.modelName].filter(Boolean).join(' · ') || undefined;
       const ok = memberId
@@ -170,8 +191,11 @@ export function PushProvider({ children }: { children: ReactNode }) {
         : await registerListenerPushToken(token, Platform.OS);
       if (ok) {
         registeredFor.current = memberId ?? '';
+        setProblem(null);
         const saved = await getPushPrefs(token);
         if (saved) setPrefs(saved);
+      } else {
+        setProblem({ kind: 'not_saved', detail: `${Platform.OS} · ${memberId ? 'member' : 'listener'}` });
       }
       return ok;
     },
@@ -273,6 +297,7 @@ export function PushProvider({ children }: { children: ReactNode }) {
     if (token) await unregisterPushToken(token);
     await remember(false);
     registeredFor.current = null;
+    setProblem(null);
     setStatus(SUPPORTED ? 'idle' : 'unsupported');
   }, [getToken]);
 
@@ -289,9 +314,14 @@ export function PushProvider({ children }: { children: ReactNode }) {
     [prefs, getToken],
   );
 
+  const retry = useCallback(
+    () => register(profile?.id ?? null),
+    [profile?.id, register],
+  );
+
   const value = useMemo(
-    () => ({ status, prefs, enable, disable, setPref }),
-    [status, prefs, enable, disable, setPref],
+    () => ({ status, prefs, problem, retry, enable, disable, setPref }),
+    [status, prefs, problem, retry, enable, disable, setPref],
   );
 
   return <PushContext.Provider value={value}>{children}</PushContext.Provider>;

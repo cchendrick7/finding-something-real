@@ -6,10 +6,35 @@
 // places that call enable().
 import { View, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
-import { usePush } from '../lib/push';
+import { usePush, type PushProblem } from '../lib/push';
 import { Button, Card, Eyebrow, H3, Rule, Small, Tiny, Toggle } from './ui';
 import { color, space } from '../lib/theme';
 import { onLoadError } from '../lib/loadError';
+
+/**
+ * Notifications are allowed but this phone is not connected (lib/push.tsx
+ * PushProblem). Says so, offers a retry, and shows the technical detail
+ * small, so a screenshot sent to the team says what went wrong.
+ */
+function NotConnected({ problem, retry, testID }: {
+  problem: NonNullable<PushProblem>; retry: () => Promise<boolean>; testID?: string;
+}) {
+  return (
+    <Card tone="gold" testID={testID}>
+      <Eyebrow tone="#8A6D28">Notifications</Eyebrow>
+      <H3 style={{ marginBottom: 4 }}>This phone isn't connected yet</H3>
+      <Small style={{ marginBottom: space.md }}>
+        Notifications are allowed, but we couldn't connect this phone to receive them, so nothing will
+        arrive yet. Check you're online and tap Try again. If it keeps happening, send a screenshot of
+        this to the FSR team.
+      </Small>
+      <Button label="Try again" onPress={() => { retry().catch(onLoadError); }} />
+      <Tiny style={{ marginTop: space.sm, color: color.faint }}>
+        {problem.kind === 'no_token' ? 'No push token' : 'Not saved'}: {problem.detail}
+      </Tiny>
+    </Card>
+  );
+}
 
 // What "Turn on notifications" turns on. Said explicitly: registering a phone
 // no longer changes its switches (push-api), so a co-host who had stopped
@@ -24,7 +49,7 @@ const openSettings = () => {
 
 /** The full settings card on the You tab: ask, explain a refusal, or the four switches. */
 export function NotificationSettings() {
-  const { status, prefs, enable, disable, setPref } = usePush();
+  const { status, prefs, enable, disable, setPref, problem, retry } = usePush();
 
   if (status === 'unsupported') {
     return (
@@ -76,6 +101,8 @@ export function NotificationSettings() {
       </Card>
     );
   }
+
+  if (problem) return <NotConnected problem={problem} retry={retry} testID="push-not-connected" />;
 
   // enabled
   return (
@@ -138,7 +165,7 @@ export function NotificationSettings() {
  * category switched off is told WHICH, and the card takes her to the You tab.
  */
 export function CohostNotificationsCard() {
-  const { status, prefs, enable } = usePush();
+  const { status, prefs, enable, problem, retry } = usePush();
   const router = useRouter();
 
   if (status === 'unsupported' || status === 'loading') return null;
@@ -175,6 +202,8 @@ export function CohostNotificationsCard() {
       </Card>
     );
   }
+
+  if (problem) return <NotConnected problem={problem} retry={retry} testID="home-push-not-connected" />;
 
   // Enabled. Name the co-host categories that are switched off, so she knows
   // exactly what will not reach her (new episodes are not one of them).
