@@ -108,6 +108,15 @@ FSR_TARGET=production node scripts/invite-template.mjs   # a deploy resets the i
 npx expo export --platform web && node scripts/host.mjs  # web app
 ```
 
+**Production drift, on purpose (8 Nov 2026).** Production's push-api Lambda
+runs the code in this repo (the push-preferences fix, commit ac8e6fb), put
+there with `UpdateFunctionCode` from the asset tested on fsrtest — not by a
+full deploy, so production's CloudFormation template still names the older
+code. Lambda version 1 of that function is the code it replaced (rollback).
+The next `ampx sandbox --identifier root` reconciles it, and also refreshes the
+other five functions' bundled libraries, which have not been redeployed since
+the source was recovered.
+
 Leaders are added with
 `FSR_TARGET=production node scripts/make-leader.mjs "<email>" "<name>"`, which
 emails the invitation; nobody sees the temporary password.
