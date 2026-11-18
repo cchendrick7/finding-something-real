@@ -207,11 +207,31 @@ export const handler = async (ctx: Ctx) => {
      */
     case 'registerListenerPushToken': {
       const existing = await getByToken(token);
-      // Do not downgrade a device that is already attached to an account —
-      // that would silently unsubscribe a co-host from her own invitations.
-      if (existing?.profileId) {
-        await upsert(token, existing.profileId, { wantsEpisodes: true });
-        return { ok: true, linkedToAccount: true };
+      /*
+       * A device we already know keeps its switches. Only a NEW row gets the
+       * listener defaults.
+       *
+       * The bug this fixes (reported 8 Nov 2026): this used to set
+       * wantsEpisodes: true on every call, and the app calls it on EVERY
+       * launch — the push provider registers before the session has loaded,
+       * so for a moment a signed-in co-host looks like a listener. A co-host
+       * who switched "New episodes" off had it switched back on each time she
+       * opened the app, kept getting episode notifications, and saw the
+       * switch on again. The same call cannot tell a launch from someone
+       * tapping "Notify me about new episodes", so it no longer changes
+       * preferences at all; the app sets wantsEpisodes through setPushPrefs
+       * when that button is tapped.
+       *
+       * And still: do not downgrade a device that is attached to an account —
+       * that would silently unsubscribe a co-host from her own invitations.
+       */
+      if (existing) {
+        await upsert(token, existing.profileId ?? null, {
+          ...(existing.profileId || !args.platform
+            ? {}
+            : { platform: String(args.platform).slice(0, 16) }),
+        });
+        return { ok: true, linkedToAccount: !!existing.profileId };
       }
       await upsert(token, null, {
         platform: args.platform ? String(args.platform).slice(0, 16) : null,
@@ -234,11 +254,28 @@ export const handler = async (ctx: Ctx) => {
       return { ok: true, ...prefsOf(row as Record<string, unknown>) };
     }
 
+    /*
+     * "Stop notifications on this phone": every category off, row KEPT.
+     *
+     * This used to delete the row. But the app re-registers on every launch
+     * whenever the phone still allows notifications — and on iPhone it still
+     * does, because stopping in the app does not touch the system setting. The
+     * re-registration found no row, created one with everything on, and a
+     * co-host's device (now a "new" row) was promoted with sessions, reminders
+     * and notes switched back on. Stopping lasted until the next launch.
+     *
+     * Kept with everything off and its profileId intact, the row survives the
+     * re-registration unchanged (no promotion: it is already a member's), the
+     * outbox skips it, and the app shows four switches that are all off — which
+     * is the truth. The row is still removed with the account.
+     */
     case 'unregisterPushToken': {
       const existing = await getByToken(token);
       if (!existing) return { ok: true };
       if (!(await mayTouch(ctx, existing))) return { ok: false, error: 'not_yours' };
-      await db.models.PushToken.delete({ id: idFor(token) });
+      await upsert(token, existing.profileId ?? null, {
+        wantsSessions: false, wantsReminders: false, wantsNotes: false, wantsEpisodes: false,
+      });
       return { ok: true };
     }
 

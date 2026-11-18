@@ -49,8 +49,12 @@ export type PushPrefs = {
 type PushContextValue = {
   status: PushStatus;
   prefs: PushPrefs;
-  /** Ask for permission (only from a button that says why) and register this phone. */
-  enable: () => Promise<boolean>;
+  /**
+   * Ask for permission (only from a button that says why) and register this
+   * phone. `want` is what the button offered, switched on explicitly — the
+   * server no longer turns anything on during registration (see push-api).
+   */
+  enable: (want?: Partial<PushPrefs>) => Promise<boolean>;
   /** Forget this phone's token on the server. */
   disable: () => Promise<void>;
   setPref: (key: keyof PushPrefs, value: boolean) => Promise<void>;
@@ -110,10 +114,20 @@ const ensureChannel = () =>
 // "Granted" there does not mean someone tapped the button, so on Android the
 // phone registers on start only if it was turned on in the app before. Keeps
 // the rule above: nothing is registered until someone asks for it.
+//
+// Every platform: "Stop notifications on this phone" is remembered here too.
+// Stopping does not change the system setting, so without this the next
+// launch saw "granted" and registered the phone again — on iPhone, with every
+// category switched back on (fixed 8 Nov 2026; the server half is in push-api).
 const ENABLED_KEY = 'fsr.push.enabled';
-const wasEnabledHere = async () => (await AsyncStorage.getItem(ENABLED_KEY).catch(() => null)) === '1';
-const rememberEnabled = (on: boolean) =>
-  (on ? AsyncStorage.setItem(ENABLED_KEY, '1') : AsyncStorage.removeItem(ENABLED_KEY)).catch(() => {});
+const STOPPED_KEY = 'fsr.push.stopped';
+const flag = async (key: string) => (await AsyncStorage.getItem(key).catch(() => null)) === '1';
+const remember = (on: boolean) =>
+  Promise.all(
+    on
+      ? [AsyncStorage.setItem(ENABLED_KEY, '1'), AsyncStorage.removeItem(STOPPED_KEY)]
+      : [AsyncStorage.removeItem(ENABLED_KEY), AsyncStorage.setItem(STOPPED_KEY, '1')],
+  ).catch(() => {});
 
 // Expo push tokens are issued per EAS project.
 const PROJECT_ID: string | undefined =
@@ -122,7 +136,7 @@ const PROJECT_ID: string | undefined =
 type NotificationData = { type?: string; id?: unknown } | null | undefined;
 
 export function PushProvider({ children }: { children: ReactNode }) {
-  const { profile } = useSession();
+  const { profile, loading: sessionLoading } = useSession();
   const [status, setStatus] = useState<PushStatus>('loading');
   const [prefs, setPrefs] = useState<PushPrefs>(DEFAULT_PREFS);
   const tokenRef = useRef<string | null>(null);
@@ -164,7 +178,12 @@ export function PushProvider({ children }: { children: ReactNode }) {
     [getToken],
   );
 
-  // On start: look, do not ask. If permission was already given, register.
+  // On start: look, do not ask. If permission was already given, mark the phone
+  // enabled — the effect below registers it once the session has loaded.
+  //
+  // It used to register right here, before the session had loaded, so for a
+  // moment every signed-in co-host was registered as a listener — and the
+  // listener path switched "New episodes" back on at every launch.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -174,11 +193,11 @@ export function PushProvider({ children }: { children: ReactNode }) {
       }
       await ensureChannel();
       const { status: permission, canAskAgain } = await Notifications.getPermissionsAsync();
-      const optedIn = ANDROID ? await wasEnabledHere() : true;
+      const stopped = await flag(STOPPED_KEY);
+      const optedIn = !stopped && (ANDROID ? await flag(ENABLED_KEY) : true);
       if (cancelled) return;
       if (permission === 'granted' && optedIn) {
         setStatus('enabled');
-        await register(profile?.id ?? null);
       } else if (permission === 'denied' && !(ANDROID && canAskAgain)) {
         // Android may ask a second time; iOS never does.
         setStatus('denied');
@@ -191,15 +210,17 @@ export function PushProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Signing in or out on an enabled phone moves the token between listener and member.
+  // Registers an enabled phone, and moves it between listener and member when
+  // someone signs in or out. Waits for the session: until it has loaded,
+  // "no profile" means "not known yet", not "a listener".
   useEffect(() => {
-    if (status !== 'enabled') return;
+    if (status !== 'enabled' || sessionLoading) return;
     const want = profile?.id ?? '';
     if (registeredFor.current === want) return;
     (async () => {
       profile?.id ? await register(profile.id) : await register(null);
     })();
-  }, [profile?.id, status, register]);
+  }, [profile?.id, status, sessionLoading, register]);
 
   // A tap on a notification opens what it is about — also the tap that launched the app.
   useEffect(() => {
@@ -221,7 +242,7 @@ export function PushProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, []);
 
-  const enable = useCallback(async () => {
+  const enable = useCallback(async (want?: Partial<PushPrefs>) => {
     if (!SUPPORTED) return false;
     await ensureChannel();
     const current = await Notifications.getPermissionsAsync();
@@ -234,15 +255,23 @@ export function PushProvider({ children }: { children: ReactNode }) {
       setStatus('denied');
       return false;
     }
+    await remember(true);
+    const ok = await register(profile?.id ?? null);
+    // Set status after registering, so the effect above does not register a
+    // second time in parallel.
     setStatus('enabled');
-    await rememberEnabled(true);
-    return register(profile?.id ?? null);
+    if (ok && want && Object.keys(want).length) {
+      const token = tokenRef.current;
+      const saved = token ? await setPushPrefs(token, want) : null;
+      if (saved) setPrefs(saved);
+    }
+    return ok;
   }, [profile?.id, register]);
 
   const disable = useCallback(async () => {
     const token = tokenRef.current ?? (await getToken());
     if (token) await unregisterPushToken(token);
-    await rememberEnabled(false);
+    await remember(false);
     registeredFor.current = null;
     setStatus(SUPPORTED ? 'idle' : 'unsupported');
   }, [getToken]);

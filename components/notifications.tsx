@@ -11,6 +11,11 @@ import { Button, Card, Eyebrow, H3, Rule, Small, Tiny, Toggle } from './ui';
 import { color, space } from '../lib/theme';
 import { onLoadError } from '../lib/loadError';
 
+// What "Turn on notifications" turns on. Said explicitly: registering a phone
+// no longer changes its switches (push-api), so a co-host who had stopped
+// notifications gets them back by asking, and only by asking.
+const EVERYTHING = { wantsSessions: true, wantsReminders: true, wantsNotes: true, wantsEpisodes: true };
+
 // After a final "no" (iOS asks once, Android twice) the only way back is the
 // app's page in the phone's Settings.
 const openSettings = () => {
@@ -65,7 +70,7 @@ export function NotificationSettings() {
           testID="enable-push"
           label="Turn on notifications"
           onPress={() => {
-            enable().catch(onLoadError);
+            enable(EVERYTHING).catch(onLoadError);
           }}
         />
       </Card>
@@ -151,7 +156,7 @@ export function CohostNotificationsCard() {
           testID="home-enable-push"
           label="Turn on notifications"
           onPress={() => {
-            enable().catch(onLoadError);
+            enable(EVERYTHING).catch(onLoadError);
           }}
         />
       </Card>
@@ -212,7 +217,7 @@ export function EpisodeAlertsCard() {
         label="Notify me about new episodes"
         variant="outline"
         onPress={() => {
-          enable().catch(onLoadError);
+          enable({ wantsEpisodes: true }).catch(onLoadError);
         }}
       />
     </Card>
