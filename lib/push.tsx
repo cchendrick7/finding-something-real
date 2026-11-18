@@ -78,8 +78,14 @@ const PushContext = createContext<PushContextValue>({
 
 export const usePush = () => useContext(PushContext);
 
-// A simulator cannot get a push token, so it is treated like the web.
-const SUPPORTED = Platform.OS !== 'web' && Device.isDevice;
+// iPhone only, and only a real one — a simulator cannot get a push token.
+//
+// Android is excluded deliberately: remote push there needs a Firebase project
+// and a google-services.json, and asking getExpoPushTokenAsync without one
+// throws "Default FirebaseApp is not initialized". The Android build is
+// otherwise complete — when FCM is set up (docs/PLAY-STORE-PLAN.md), change
+// this to `Platform.OS !== 'web'` and nothing else changes.
+const SUPPORTED = Platform.OS === 'ios' && Device.isDevice;
 
 // Expo push tokens are issued per EAS project.
 const PROJECT_ID: string | undefined =
