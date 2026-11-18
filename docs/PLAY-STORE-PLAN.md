@@ -80,6 +80,12 @@ More than you'd think. The Android side of the app was built alongside iOS.
 
 ### 1. Push notifications do not work on Android at all. (half a day)
 
+> **Done 25 Oct 2026, build 3.** Firebase project `finding-something-real`
+> (curtis@meritdigitalgroup.com, Analytics off), google-services.json in the
+> repo, FCM V1 key on EAS, 'default' channel created in lib/push.tsx. Step 5
+> was unnecessary: Expo push tokens have the same form on both platforms.
+> Not yet tested on a real Android phone.
+
 The largest real gap, and it matters more after this week: the co-host
 notification work — invitations, reminders, notes, the cancelled-session
 notices — is the whole reason a co-host opens this app.
