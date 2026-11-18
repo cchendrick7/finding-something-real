@@ -11,7 +11,8 @@ import { Button, Card, Eyebrow, H3, Rule, Small, Tiny, Toggle } from './ui';
 import { color, space } from '../lib/theme';
 import { onLoadError } from '../lib/loadError';
 
-// iOS only asks once. After a "no" the only way back is the app's page in Settings.
+// After a final "no" (iOS asks once, Android twice) the only way back is the
+// app's page in the phone's Settings.
 const openSettings = () => {
   Linking.openSettings().catch(onLoadError);
 };
@@ -24,7 +25,7 @@ export function NotificationSettings() {
     return (
       <Card>
         <Eyebrow>Notifications</Eyebrow>
-        <Small>Not available in this version of the app. Open it on an iPhone to get reminders before a recording.</Small>
+        <Small>Notifications come through the phone app. Open Finding Something Real on your phone to get reminders before a recording.</Small>
       </Card>
     );
   }
@@ -44,7 +45,7 @@ export function NotificationSettings() {
         <Eyebrow tone="#8A6D28">Notifications</Eyebrow>
         <H3 style={{ marginBottom: 4 }}>Turned off for this app</H3>
         <Small style={{ marginBottom: space.md }}>
-          iOS only asks once, and the answer was no. It can be changed in Settings — everything else in the app works either way.
+          They are turned off for this app in your phone's settings. That can be changed in Settings — everything else in the app works either way.
         </Small>
         <Button label="Open Settings" variant="outline" onPress={openSettings} />
       </Card>
@@ -163,7 +164,7 @@ export function CohostNotificationsCard() {
         <Eyebrow tone="#8A6D28">Stay connected</Eyebrow>
         <H3 style={{ marginBottom: 4 }}>Notifications are off</H3>
         <Small style={{ marginBottom: space.md }}>
-          iOS only asks once and the answer was no, so recording invitations, schedule changes and notes from Janell will not reach this phone. Everything is still here in the app — but you will have to come looking.
+          They are turned off for this app in your phone's settings, so recording invitations, schedule changes and notes from Janell will not reach this phone. Everything is still here in the app — but you will have to come looking.
         </Small>
         <Button label="Open Settings" variant="outline" onPress={openSettings} />
       </Card>

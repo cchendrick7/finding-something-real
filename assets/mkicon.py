@@ -54,5 +54,11 @@ mark(432, WHITE, width_frac=0.44).save('android-icon-monochrome.png')  # themed 
 # Splash: shown on paper (#FBFAF9, app.json), so the emblem is ink.
 mark(1024, INK, width_frac=0.46).save('splash-icon.png')
 
+# Android notification icon: the status bar shows only the alpha channel,
+# tinted by the system, so it is the emblem in white on nothing. 96px is the
+# xxxhdpi size of the 24dp icon; Android wants about 2dp clear on each side.
+# Wired up as the expo-notifications plugin's `icon` in app.json.
+mark(96, WHITE, width_frac=0.82).save('notification-icon.png')
+
 # Web tab icon.
 mark(196, WHITE, INK, width_frac=0.68).convert('RGB').save('favicon.png')

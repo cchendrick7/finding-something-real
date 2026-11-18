@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "467607391608",
+    "project_id": "finding-something-real",
+    "storage_bucket": "finding-something-real.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:467607391608:android:4eaa48928b9e1550018c8d",
+        "android_client_info": {
+          "package_name": "com.findingsomethingreal.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyvIyj2rvzrClmUK68lO1hIFzt4-r1aR4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

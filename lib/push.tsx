@@ -21,6 +21,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useSession } from './session';
 import {
@@ -78,14 +79,41 @@ const PushContext = createContext<PushContextValue>({
 
 export const usePush = () => useContext(PushContext);
 
-// iPhone only, and only a real one — a simulator cannot get a push token.
+// Phones only, and only real ones — a simulator or emulator cannot get a token.
 //
-// Android is excluded deliberately: remote push there needs a Firebase project
-// and a google-services.json, and asking getExpoPushTokenAsync without one
-// throws "Default FirebaseApp is not initialized". The Android build is
-// otherwise complete — when FCM is set up (docs/PLAY-STORE-PLAN.md), change
-// this to `Platform.OS !== 'web'` and nothing else changes.
-const SUPPORTED = Platform.OS === 'ios' && Device.isDevice;
+// Android since build 3 (25 Oct 2026). It needs the Firebase project
+// "finding-something-real" (google-services.json, android.googleServicesFile in
+// app.json) and that project's FCM V1 service-account key on EAS, which Expo's
+// push service uses to reach Google. Without the Firebase file,
+// getExpoPushTokenAsync throws "Default FirebaseApp is not initialized".
+const SUPPORTED = Platform.OS !== 'web' && Device.isDevice;
+const ANDROID = Platform.OS === 'android';
+
+// Android delivers every notification through a channel, and the outbox sends
+// with channelId 'default' (amplify/functions/push-outbox). It must exist before
+// the permission prompt — Android 13+ does not show the prompt until one does —
+// and before asking for a token. HIGH makes it a banner, as it is on iPhone.
+// Creating it again is harmless; only the first call sets the importance.
+let channelReady: Promise<unknown> | null = null;
+const ensureChannel = () =>
+  ANDROID
+    ? (channelReady ??= Notifications.setNotificationChannelAsync('default', {
+        name: 'Finding Something Real',
+        importance: Notifications.AndroidImportance.HIGH,
+      }).catch((e) => {
+        channelReady = null;
+        console.log('push: could not create the channel', e);
+      }))
+    : Promise.resolve();
+
+// Before Android 13, notifications are allowed from install — nobody was asked.
+// "Granted" there does not mean someone tapped the button, so on Android the
+// phone registers on start only if it was turned on in the app before. Keeps
+// the rule above: nothing is registered until someone asks for it.
+const ENABLED_KEY = 'fsr.push.enabled';
+const wasEnabledHere = async () => (await AsyncStorage.getItem(ENABLED_KEY).catch(() => null)) === '1';
+const rememberEnabled = (on: boolean) =>
+  (on ? AsyncStorage.setItem(ENABLED_KEY, '1') : AsyncStorage.removeItem(ENABLED_KEY)).catch(() => {});
 
 // Expo push tokens are issued per EAS project.
 const PROJECT_ID: string | undefined =
@@ -144,12 +172,15 @@ export function PushProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setStatus('unsupported');
         return;
       }
-      const { status: permission } = await Notifications.getPermissionsAsync();
+      await ensureChannel();
+      const { status: permission, canAskAgain } = await Notifications.getPermissionsAsync();
+      const optedIn = ANDROID ? await wasEnabledHere() : true;
       if (cancelled) return;
-      if (permission === 'granted') {
+      if (permission === 'granted' && optedIn) {
         setStatus('enabled');
         await register(profile?.id ?? null);
-      } else if (permission === 'denied') {
+      } else if (permission === 'denied' && !(ANDROID && canAskAgain)) {
+        // Android may ask a second time; iOS never does.
         setStatus('denied');
       } else {
         setStatus('idle');
@@ -192,6 +223,7 @@ export function PushProvider({ children }: { children: ReactNode }) {
 
   const enable = useCallback(async () => {
     if (!SUPPORTED) return false;
+    await ensureChannel();
     const current = await Notifications.getPermissionsAsync();
     let granted = current.status === 'granted';
     if (!granted && current.canAskAgain) {
@@ -203,12 +235,14 @@ export function PushProvider({ children }: { children: ReactNode }) {
       return false;
     }
     setStatus('enabled');
+    await rememberEnabled(true);
     return register(profile?.id ?? null);
   }, [profile?.id, register]);
 
   const disable = useCallback(async () => {
     const token = tokenRef.current ?? (await getToken());
     if (token) await unregisterPushToken(token);
+    await rememberEnabled(false);
     registeredFor.current = null;
     setStatus(SUPPORTED ? 'idle' : 'unsupported');
   }, [getToken]);

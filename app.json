@@ -23,6 +23,7 @@
     },
     "android": {
       "package": "com.findingsomethingreal.app",
+      "googleServicesFile": "./google-services.json",
       "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
@@ -46,7 +47,10 @@
         "expo-notifications",
         {
           "mode": "production",
-          "enableBackgroundRemoteNotifications": false
+          "enableBackgroundRemoteNotifications": false,
+          "icon": "./assets/notification-icon.png",
+          "color": "#000000",
+          "defaultChannel": "default"
         }
       ],
       [
