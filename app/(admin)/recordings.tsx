@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { listRecordings, listGuests, listMembers, publishRecording, withdrawRecording } from '@/lib/data';
+import { listRecordings, listGuests, listCohosts, publishRecording, withdrawRecording } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr, isUnsociable } from '@/lib/tz';
 import { Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button, Field } from '@/components/ui';
 import { space, color } from '@/lib/theme';
@@ -26,7 +26,7 @@ export default function Recordings() {
     (async () => {
       setRecs(await listRecordings(true));
       setGuests(await listGuests());
-      setMembers((await listMembers()).filter((m) => m.role === 'member'));
+      setMembers(await listCohosts());
     })().catch(onLoadError);
   }, []);
   useFocusEffect(load);

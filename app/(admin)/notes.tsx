@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { createNote, listAllNotes, listMembers, readStats, renderNoteBody } from '@/lib/data';
+import { createNote, listAllNotes, listCohosts, readStats, renderNoteBody } from '@/lib/data';
 import { Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button, Field, Wrap } from '@/components/ui';
 import { space, color } from '@/lib/theme';
 import type { Note, Profile, NoteAudience } from '@/lib/types';
@@ -29,7 +29,7 @@ export default function Notes() {
 
   const load = useCallback(() => {
     (async () => {
-      setMembers((await listMembers()).filter((m) => m.role === 'member'));
+      setMembers(await listCohosts());
       setNotes(await listAllNotes());
     })().catch(onLoadError);
   }, []);
@@ -120,7 +120,7 @@ export default function Notes() {
 }
 
 function SentNote({ note }: { note: Note }) {
-  const [s, setS] = useState({ total: 0, opened: 0, undelivered: 0 });
+  const [s, setS] = useState({ total: 0, opened: 0, notified: 0 });
   useFocusEffect(useCallback(() => { readStats(note.id).then(setS); }, [note.id]));
   return (
     <Card>
@@ -129,7 +129,7 @@ function SentNote({ note }: { note: Note }) {
         <Pill label={note.audience} tone="plain" />
       </Row>
       <Small style={{ marginTop: 6 }}>
-        {s.opened} of {s.total} opened{s.undelivered ? ` · ${s.undelivered} never delivered` : ''}
+        {s.opened} of {s.total} opened in the app · {s.notified} sent a notification
       </Small>
     </Card>
   );

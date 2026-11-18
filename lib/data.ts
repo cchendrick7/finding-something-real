@@ -149,6 +149,17 @@ export async function listMembers(): Promise<Profile[]> {
 }
 
 /**
+ * The current co-hosts: role member, not removed. What every leadership count
+ * and roster is about. listMembers itself keeps removed people, because
+ * questions, messages and prayer requests they sent still need a name.
+ * (Demo mode already filtered them; production showed removed accounts on
+ * Responses until 8 Nov 2026.)
+ */
+export async function listCohosts(): Promise<Profile[]> {
+  return (await listMembers()).filter((m) => m.role === 'member' && m.status !== 'removed');
+}
+
+/**
  * Leadership's People screen: everyone, including removed accounts, which sort
  * to the bottom so they can be found and restored without crowding the list.
  */
@@ -657,15 +668,72 @@ export async function setRsvp(
   return row;
 }
 
-/** Admin view: the full roster including declines and silence. */
+/**
+ * Can notifications reach her phone? Per co-host: 'on' — a live phone with
+ * this category switched on; 'muted' — a phone, but this category is off;
+ * 'off' — no phone registered at all (never turned notifications on in the
+ * app, or never installed it). Read from PushToken, which only leadership can.
+ */
+export type PushReach = 'on' | 'muted' | 'off';
+type PushCategory = 'wantsSessions' | 'wantsReminders' | 'wantsNotes' | 'wantsEpisodes';
+
+export async function pushReach(category: PushCategory): Promise<Map<string, PushReach>> {
+  const out = new Map<string, PushReach>();
+  if (DEMO_MODE) {
+    // The demo has no devices; a delivered receipt stands in for "has a phone".
+    for (const r of db.receipts) if (r.delivered_at) out.set(r.profile_id, 'on');
+    return out;
+  }
+  const rows = await listAll(client.models.PushToken.list, {});
+  for (const t of rows) {
+    if (!t.profileId || t.retiredAt) continue;
+    const here: PushReach = t[category] === false ? 'muted' : 'on';
+    // Any one phone that will get it is enough.
+    if (out.get(t.profileId) !== 'on') out.set(t.profileId, here);
+  }
+  return out;
+}
+
+/**
+ * When each person was sent a notification about this target, by profile id.
+ *
+ * NotificationLog is written by the outbox and is the only record of a push
+ * going out — sentAt is set once Expo has accepted it for her phones. Kinds
+ * are matched by prefix ('session' covers session_invite, session_moved:… and
+ * session_cancelled).
+ */
+async function notifiedAt(targetId: string, kindPrefix: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (DEMO_MODE) {
+    for (const r of db.receipts) if (r.target_id === targetId && r.delivered_at) out.set(r.profile_id, r.delivered_at);
+    return out;
+  }
+  const rows = await listAll(client.models.NotificationLog.list, {
+    filter: { targetId: { eq: targetId } },
+  });
+  for (const l of rows) {
+    if (!l.profileId || !l.sentAt || !String(l.kind).startsWith(kindPrefix)) continue;
+    const prev = out.get(l.profileId);
+    if (!prev || l.sentAt < prev) out.set(l.profileId, l.sentAt);
+  }
+  return out;
+}
+
+/**
+ * Admin view: the full roster including declines and silence, and whether the
+ * invitation reached each co-host's phone.
+ *
+ * Until 8 Nov 2026 "delivered" and "opened" here came from Receipt rows for
+ * NOTES — written only when someone opened a note in the app, never by the
+ * push outbox — so everyone who had not opened a note showed "NOT DELIVERED —
+ * Push is off", including co-hosts who had been sent every invitation.
+ */
 export async function rsvpRoster(recordingId: string) {
-  const members = (await listMembers()).filter((m) => m.role === 'member');
+  const members = await listCohosts();
   let rows: Rsvp[] = [];
-  let reads: Receipt[] = [];
 
   if (DEMO_MODE) {
     rows = db.rsvps.filter((r) => r.recording_id === recordingId);
-    reads = db.receipts.filter((r) => r.target_type === 'note');
   } else {
     rows = (await listAll(client.models.Rsvp.list, {
       filter: { recordingId: { eq: recordingId } },
@@ -674,24 +742,21 @@ export async function rsvpRoster(recordingId: string) {
       response: (r.response ?? 'no') as 'yes' | 'no',
       note: r.note ?? null, responded_at: r.respondedAt ?? '',
     }));
-    reads = (await listAll(client.models.Receipt.list, {
-      filter: { targetType: { eq: 'note' } },
-    })).map((r) => ({
-      id: r.id, profile_id: r.profileId, target_type: 'note',
-      target_id: r.targetId, delivered_at: r.deliveredAt ?? null, opened_at: r.openedAt ?? null,
-    }));
   }
+  const [reach, sent] = await Promise.all([
+    pushReach('wantsSessions'),
+    notifiedAt(recordingId, 'session'),
+  ]);
 
   return members.map((m) => {
     const rsvp = rows.find((r) => r.profile_id === m.id) ?? null;
-    const receipt = reads.find((r) => r.profile_id === m.id) ?? null;
     return {
       member: m,
       response: rsvp?.response ?? null,
       respondedAt: rsvp?.responded_at ?? null,
       note: rsvp?.note ?? null,
-      deliveredAt: receipt?.delivered_at ?? null,
-      openedAt: receipt?.opened_at ?? null,
+      notifiedAt: sent.get(m.id) ?? null,
+      push: reach.get(m.id) ?? ('off' as PushReach),
     };
   });
 }
@@ -785,8 +850,12 @@ export async function markRead(me: string, targetType: string, targetId: string)
   await client.mutations.markRead({ targetType, targetId });
 }
 
+/**
+ * For a sent note: how many co-hosts opened it in the app (Receipt, written by
+ * markRead) and how many were sent a notification about it (NotificationLog).
+ */
 export async function readStats(noteId: string) {
-  const members = (await listMembers()).filter((m) => m.role === 'member');
+  const members = await listCohosts();
   const rs: Receipt[] = DEMO_MODE
     ? db.receipts.filter((r) => r.target_type === 'note' && r.target_id === noteId)
     : (await listAll(client.models.Receipt.list, {
@@ -795,9 +864,17 @@ export async function readStats(noteId: string) {
         id: r.id, profile_id: r.profileId, target_type: 'note', target_id: r.targetId,
         delivered_at: r.deliveredAt ?? null, opened_at: r.openedAt ?? null,
       }));
-  const opened = rs.filter((r) => r.opened_at).length;
-  const undelivered = members.filter((m) => !rs.find((r) => r.profile_id === m.id && r.delivered_at)).length;
-  return { total: members.length, opened, undelivered };
+  const ids = new Set(members.map((m) => m.id));
+  const opened = rs.filter((r) => r.opened_at && ids.has(r.profile_id)).length;
+  const sent = await notifiedAt(noteId, 'note');
+  const notified = members.filter((m) => sent.has(m.id)).length;
+  return { total: members.length, opened, notified };
+}
+
+/** Co-hosts that a new-recording invitation cannot reach at all, by name. */
+export async function pushOff(): Promise<Profile[]> {
+  const [members, reach] = await Promise.all([listCohosts(), pushReach('wantsSessions')]);
+  return members.filter((m) => reach.get(m.id) !== 'on');
 }
 
 /* --------------------------------------------------------------- questions */
@@ -892,7 +969,7 @@ export interface CoverageStatus {
 
 export async function coverageStatus(): Promise<CoverageStatus> {
   const intake = await listIntake();
-  const members = (await listMembers()).filter((m) => m.role === 'member');
+  const members = await listCohosts();
   const covered = new Set(intake.filter((q) => q.recordings.length > 0).map((q) => q.profile_id));
   const asked = new Set(intake.map((q) => q.profile_id));
   const uncovered = members.filter((m) => !covered.has(m.id));

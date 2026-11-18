@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { listRecordings, rsvpRoster, listQuestions } from '@/lib/data';
+import { listRecordings, rsvpRoster, listQuestions, type PushReach } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr } from '@/lib/tz';
 import { Screen, Display, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row } from '@/components/ui';
 import { space, color } from '@/lib/theme';
@@ -11,8 +11,19 @@ import { onLoadError } from '@/lib/loadError';
 
 type RosterRow = {
   member: Profile; response: string | null; respondedAt: string | null;
-  note: string | null; deliveredAt: string | null; openedAt: string | null;
+  note: string | null; notifiedAt: string | null; push: PushReach;
 };
+
+/**
+ * The session this screen is about: the next one coming up, or — when none is
+ * scheduled — the most recent. (It used to take the first published session in
+ * date order, which after the first week was always one in the past.)
+ */
+function pick(recs: Recording[]): Recording | null {
+  const published = recs.filter((r) => r.published_at && !r.cancelled_at);
+  const now = Date.now();
+  return published.find((r) => Date.parse(r.scheduled_at) > now) ?? published[published.length - 1] ?? null;
+}
 
 export default function Responses() {
   const { profile } = useSession();
@@ -23,7 +34,7 @@ export default function Responses() {
   useFocusEffect(useCallback(() => {
     (async () => {
       const recs = await listRecordings(true);
-      const next = recs.find((r) => r.published_at) ?? null;
+      const next = pick(recs);
       setRec(next);
       if (next) setRoster(await rsvpRoster(next.id));
       setQs(await listQuestions());
@@ -35,7 +46,7 @@ export default function Responses() {
 
   return (
     <Screen>
-      <Eyebrow>Delivered · opened · responded</Eyebrow>
+      <Eyebrow>Notified · responded</Eyebrow>
       <Display>Responses</Display>
       {rec ? (
         <Small style={{ marginTop: 4 }}>
@@ -53,20 +64,31 @@ export default function Responses() {
               tone={r.response === 'yes' ? 'sage' : r.response === 'no' ? 'muted' : 'plain'}
             />
           </Row>
+          {/* From NotificationLog (what the outbox sent) and PushToken (her
+              phones) — the two records of what actually happened. */}
           <Row style={{ marginTop: 8, flexWrap: 'wrap' }}>
-            <Tiny style={{ color: r.deliveredAt ? color.muted : color.gold }}>
-              {r.deliveredAt ? 'Delivered' : 'NOT DELIVERED'}
-            </Tiny>
-            <Tiny>·</Tiny>
-            <Tiny style={{ color: r.openedAt ? color.sage : color.faint }}>
-              {r.openedAt ? `Opened ${formatTime(r.openedAt, tz)}` : 'Not opened'}
+            <Tiny style={{ color: r.notifiedAt ? color.muted : color.gold }}>
+              {r.notifiedAt
+                ? `Notified ${formatDate(r.notifiedAt, tz)} ${formatTime(r.notifiedAt, tz)}`
+                : 'NOT NOTIFIED'}
             </Tiny>
           </Row>
           {r.note ? <Small style={{ marginTop: 8, fontStyle: 'italic' }}>&ldquo;{r.note}&rdquo;</Small> : null}
-          {!r.deliveredAt ? (
+          {!r.notifiedAt && r.push === 'off' ? (
             <Card tone="gold" style={{ marginTop: space.md, marginBottom: 0 }}>
-              <Tiny>Push is off — she never received it. That's a phone call, not a nudge.</Tiny>
+              <Tiny>
+                Notifications aren't set up on her phone — the app isn't installed, or she never
+                tapped "Turn on notifications". That's a phone call, not a nudge.
+              </Tiny>
             </Card>
+          ) : !r.notifiedAt && r.push === 'muted' ? (
+            <Card tone="gold" style={{ marginTop: space.md, marginBottom: 0 }}>
+              <Tiny>She has switched off new-recording notifications in the app.</Tiny>
+            </Card>
+          ) : !r.notifiedAt ? (
+            <Small style={{ marginTop: 8 }}>
+              Her notifications are on now — this invitation went out before her phone was set up.
+            </Small>
           ) : null}
         </Card>
       ))}

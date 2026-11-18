@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSession } from '@/lib/session';
-import { listRecordings, rsvpRoster, readStats, listAllNotes, coverageStatus, listGuests, listMessages, listInquiries } from '@/lib/data';
+import { listRecordings, rsvpRoster, pushOff, readStats, listAllNotes, coverageStatus, listGuests, listMessages, listInquiries } from '@/lib/data';
 import { formatDate, formatTime, zoneAbbr } from '@/lib/tz';
 import { Screen, Display, H2, H3, Body, Small, Tiny, Card, Eyebrow, Rule, Pill, Row, Button } from '@/components/ui';
 import { space, color, type } from '@/lib/theme';
@@ -23,7 +23,8 @@ export default function Overview() {
   const router = useRouter();
   const [recs, setRecs] = useState<Recording[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
-  const [stats, setStats] = useState({ total: 0, opened: 0, undelivered: 0 });
+  const [unreachable, setUnreachable] = useState<Profile[]>([]);
+  const [stats, setStats] = useState({ total: 0, opened: 0, notified: 0 });
   const [yes, setYes] = useState(0);
   const [silent, setSilent] = useState(0);
   const [cover, setCover] = useState<{ waiting: Profile[]; neverAsked: Profile[] }>({ waiting: [], neverAsked: [] });
@@ -34,6 +35,9 @@ export default function Overview() {
     (async () => {
       const r = await listRecordings(true);
       setRecs(r); setGuests(await listGuests());
+      // From the devices themselves (PushToken), not from who opened a note —
+      // the old count treated "has not opened the latest note" as "push is off".
+      setUnreachable(await pushOff());
       const notes = await listAllNotes();
       const published = notes.find((n) => n.published_at);
       if (published) setStats(await readStats(published.id));
@@ -101,12 +105,13 @@ export default function Overview() {
         </Row>
       ) : null}
 
-      {stats.undelivered > 0 ? (
+      {unreachable.length > 0 ? (
         <Card tone="gold">
-          <Eyebrow tone="#8A6D28">Push is off for {stats.undelivered}</Eyebrow>
+          <Eyebrow tone="#8A6D28">Notifications off for {unreachable.length}</Eyebrow>
           <Body>
-            They won't receive recording invitations at all. This is the one failure the app
-            can't fix on its own — worth a text.
+            {unreachable.map((p) => p.display_name).join(', ')} — recording invitations won't reach
+            their phones. Usually the app isn't installed or "Turn on notifications" was never
+            tapped; now and then she has switched new-recording notifications off. Worth a text.
           </Body>
         </Card>
       ) : null}

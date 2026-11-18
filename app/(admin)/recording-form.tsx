@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useSession } from '@/lib/session';
 import {
-  listRecordings, listGuests, listMembers, createRecording, updateRecording, createGuest,
+  listRecordings, listGuests, listCohosts, createRecording, updateRecording, createGuest,
 } from '@/lib/data';
 import {
   formatTime, zoneAbbr, isUnsociable, zonedToUtcIso, utcIsoToZonedFields,
@@ -58,7 +58,7 @@ export default function RecordingForm() {
   useFocusEffect(useCallback(() => {
     (async () => {
       setGuests(await listGuests());
-      setMembers((await listMembers()).filter((m) => m.role === 'member'));
+      setMembers(await listCohosts());
       if (id) {
         const rec = (await listRecordings(true)).find((r) => r.id === id);
         if (rec) {
