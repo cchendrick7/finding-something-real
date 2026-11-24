@@ -9,7 +9,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.findingsomethingreal.app",
-      "buildNumber": "22",
+      "buildNumber": "23",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "https",
