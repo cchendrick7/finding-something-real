@@ -6,7 +6,7 @@ import {
   listRecordings, listGuests, listCohosts, createRecording, updateRecording, createGuest,
 } from '@/lib/data';
 import {
-  formatTime, zoneAbbr, isUnsociable, zonedToUtcIso, utcIsoToZonedFields,
+  formatDate, formatTime, zoneAbbr, isUnsociable, zonedToUtcIso, utcIsoToZonedFields,
 } from '@/lib/tz';
 import {
   Screen, Display, Body, Small, Tiny, Card, Eyebrow, Rule, Button, Field, Row, Wrap,
@@ -28,6 +28,25 @@ import { STUDIO_URL } from '@/lib/ministry';
  * Saving never publishes. Publishing is what notifies co-hosts and it stays a
  * separate, deliberate action on the Recordings screen.
  */
+/**
+ * A start time as people type it: "8:30", "08:30", "18:00", "8:30 pm",
+ * "8:30pm", "8:30 p.m." Returns 24-hour "HH:MM", or null if it is not a time.
+ * Without am/pm the hours are read as 24-hour, as the field always was.
+ */
+function parseStart(raw: string): string | null {
+  const m = /^\s*(\d{1,2}):(\d{2})\s*([ap])?\.?\s*(m\.?)?\s*$/i.exec(raw);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  if (min > 59) return null;
+  if (m[3]) {
+    if (h < 1 || h > 12) return null;
+    const pm = m[3].toLowerCase() === 'p';
+    h = (h % 12) + (pm ? 12 : 0);
+  } else if (h > 23) return null;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
 export default function RecordingForm() {
   const { profile } = useSession();
   const router = useRouter();
@@ -93,12 +112,22 @@ export default function RecordingForm() {
   if (!profile) return null;
 
   const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(date);
-  const timeOk = /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
-  const canSave = title.trim().length > 1 && dateOk && timeOk && !busy;
+  const hhmm = parseStart(time);
+  const timeOk = hhmm !== null;
+  const titleOk = title.trim().length > 1;
+  const canSave = titleOk && dateOk && timeOk && !busy;
+  // Said out loud when the button is off. It used to just grey out, with
+  // "24h, HH:MM" in small grey type as the only clue (Lauren, 20 Nov 2026,
+  // typed 8:30 and could not save).
+  const missing = [
+    !titleOk && 'a title',
+    !dateOk && 'a date like 2026-12-11',
+    !timeOk && 'a start time like 8:30 or 6:00 pm',
+  ].filter(Boolean) as string[];
 
   let previewIso: string | null = null;
-  if (dateOk && timeOk) {
-    try { previewIso = zonedToUtcIso(date, time, tz); } catch { previewIso = null; }
+  if (dateOk && hhmm) {
+    try { previewIso = zonedToUtcIso(date, hhmm, tz); } catch { previewIso = null; }
   }
   const clashes = previewIso
     ? members.filter((m) => isUnsociable(previewIso as string, m.timezone))
@@ -111,7 +140,7 @@ export default function RecordingForm() {
       if (!gid && newGuest.trim()) gid = await createGuest(newGuest.trim());
       const draft = {
         title: title.trim(),
-        scheduled_at: zonedToUtcIso(date, time, tz),
+        scheduled_at: zonedToUtcIso(date, hhmm as string, tz),
         duration_minutes: Number(duration) || 90,
         guest_id: gid,
         topic: topic.trim() || null,
@@ -153,7 +182,7 @@ export default function RecordingForm() {
             <View style={{ flex: 1 }}>
               <Field label="Start" value={time} onChangeText={setTime} testID="f-time"
                      placeholder="18:00" autoCapitalize="none"
-                     hint={timeOk ? undefined : '24h, HH:MM'} />
+                     hint={timeOk ? undefined : 'e.g. 8:30 or 6:00 pm'} />
             </View>
             <View style={{ flex: 0.9 }}>
               <Field label="Minutes" value={duration} onChangeText={setDuration}
@@ -161,8 +190,10 @@ export default function RecordingForm() {
             </View>
           </Row>
 
-          <Tiny style={{ marginTop: -6, marginBottom: space.md }}>
-            Entered in your zone — {zoneAbbr(previewIso ?? new Date().toISOString(), tz)}.
+          <Tiny style={{ marginTop: -6, marginBottom: space.md }} testID="f-when">
+            {previewIso
+              ? `Starts ${formatDate(previewIso, tz)} at ${formatTime(previewIso, tz)} ${zoneAbbr(previewIso, tz)} — your zone. Without am/pm, times are 24-hour.`
+              : `Entered in your zone — ${zoneAbbr(new Date().toISOString(), tz)}.`}
           </Tiny>
 
           {/* What this slot actually costs the people who have to show up. */}
@@ -227,6 +258,11 @@ export default function RecordingForm() {
                    : 'The studio link is the same every time. Leave it as it is unless this session is somewhere else.'} />
 
           {err ? <Tiny style={{ color: color.danger, marginBottom: 10 }} testID="form-error">{err}</Tiny> : null}
+          {!busy && missing.length ? (
+            <Tiny style={{ color: color.danger, marginBottom: 10 }} testID="form-missing">
+              To save, add {missing.join(', ')}.
+            </Tiny>
+          ) : null}
 
           <Button
             testID="f-save"
